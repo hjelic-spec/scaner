@@ -100,11 +100,6 @@ function embCountries(embCodes) {
   });
 }
 
-const EXPIRY_KIND = {
-  best_before: 'Najbolje upotrijebiti do',
-  use_by: 'Upotrijebiti do',
-};
-
 const NOVA_HR = {
   1: 'Neprerađena ili minimalno prerađena hrana',
   2: 'Prerađeni kulinarski sastojci',
@@ -360,130 +355,6 @@ function originHtml(code, p) {
   return html;
 }
 
-/* ---------- Rok trajanja (po pakiranju, lokalno) ---------- */
-
-function daysUntil(iso) {
-  const [y, m, d] = iso.split('-').map(Number);
-  const target = new Date(y, m - 1, d);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.round((target - today) / 86400000);
-}
-
-function fmtDate(iso, monthOnly) {
-  const [y, m, d] = iso.split('-');
-  return monthOnly ? `kraj ${m}/${y}` : `${Number(d)}. ${Number(m)}. ${y}.`;
-}
-
-function expiryStatusHtml(entry) {
-  const days = daysUntil(entry.date);
-  const label = `${EXPIRY_KIND[entry.kind] || EXPIRY_KIND.best_before}: <strong>${escapeHtml(fmtDate(entry.date, entry.monthOnly))}</strong>`;
-  let cls = 'ok';
-  let text;
-  if (days < 0) {
-    cls = 'danger';
-    text = `Istekao prije ${-days} ${-days === 1 ? 'dan' : 'dana'}.`;
-    text += entry.kind === 'use_by'
-      ? ' Ne konzumirati — nakon roka „upotrijebiti do” hrana se smatra nesigurnom.'
-      : ' Nakon roka „najbolje upotrijebiti do” proizvod može biti i dalje siguran ako je neoštećen i pravilno čuvan, ali proizvođač više ne jamči kvalitetu.';
-  } else if (days === 0) {
-    cls = 'warn';
-    text = 'Ističe danas.';
-  } else if (days <= 3) {
-    cls = 'warn';
-    text = `Ističe za ${days} ${days === 1 ? 'dan' : 'dana'}.`;
-  } else {
-    text = `Vrijedi još ${days} dana.`;
-  }
-  return `<p class="alert ${cls}">${label}<br>${escapeHtml(text)}</p>`;
-}
-
-async function renderExpiry(code) {
-  let entry = null;
-  try { entry = await LocalDb.getExpiry(code); } catch { /* bez lokalne baze */ }
-  const body = document.querySelector('#expiry-body');
-  if (!body || resultEl.dataset.code !== code) return;
-  body.innerHTML = `
-    ${entry ? expiryStatusHtml(entry) : '<p class="muted">Rok trajanja ovisi o pakiranju i ne postoji u bazama. Upiši ga ili ga očitaj fotografijom s pakiranja.</p>'}
-    <div class="expiry-form">
-      <select id="expiry-kind" aria-label="Vrsta roka">
-        ${Object.entries(EXPIRY_KIND).map(([k, v]) => `<option value="${k}"${entry && entry.kind === k ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('')}
-      </select>
-      <input type="date" id="expiry-date" aria-label="Datum" value="${entry ? escapeHtml(entry.date) : ''}">
-    </div>
-    <div class="actions expiry-actions">
-      <button type="button" data-action="expiry-ocr">📷 Očitaj s pakiranja</button>
-      <button type="button" class="primary" data-action="expiry-save" data-code="${escapeHtml(code)}">Spremi rok</button>
-    </div>
-    ${entry ? `<button type="button" class="link" data-action="expiry-clear" data-code="${escapeHtml(code)}">Ukloni rok</button>` : ''}
-    <input type="file" id="expiry-file" accept="image/*" capture="environment" hidden>
-    <p id="expiry-msg" class="status small" role="status" aria-live="polite"></p>`;
-}
-
-async function saveExpiry(code, date, kind, monthOnly = false) {
-  if (!date) {
-    await LocalDb.removeExpiry(code);
-    return;
-  }
-  await LocalDb.putExpiry({ code, date, kind, monthOnly, updated: Date.now() });
-}
-
-async function ocrExpiry(file) {
-  const msg = $('#expiry-msg');
-  msg.classList.remove('error');
-  msg.textContent = 'Prepoznajem datum… (prvi put se preuzima oko 10 MB)';
-  try {
-    const { text } = await LabelOcr.recognize(file, (m) => {
-      if (m.status === 'recognizing text') msg.textContent = `Prepoznajem datum… ${Math.round(m.progress * 100)} %`;
-    });
-    const found = LabelOcr.findExpiry(text);
-    if (!found) {
-      msg.textContent = 'Datum nije prepoznat. Fotografiraj izbliza samo datum, uz dobro svjetlo, ili ga upiši ručno.';
-      return;
-    }
-    $('#expiry-date').value = found.date;
-    $('#expiry-kind').value = found.kind;
-    $('#expiry-date').dataset.monthOnly = found.monthOnly ? '1' : '';
-    const shown = fmtDate(found.date, found.monthOnly);
-    msg.textContent = `Prepoznato: ${EXPIRY_KIND[found.kind]} ${shown}${shown.endsWith('.') ? '' : '.'}`
-      + (found.sure ? '' : ' Uz datum nije pronađen natpis roka — možda je to datum proizvodnje.')
-      + ' Provjeri pa pritisni „Spremi rok”.';
-  } catch (err) {
-    msg.classList.add('error');
-    msg.textContent = 'Prepoznavanje nije uspjelo: ' + (err && err.message ? err.message : err);
-  }
-}
-
-resultEl.addEventListener('click', async (e) => {
-  const btn = e.target.closest('button[data-action^="expiry-"]');
-  if (!btn) return;
-  const action = btn.dataset.action;
-  if (action === 'expiry-ocr') { $('#expiry-file').click(); return; }
-  const code = btn.dataset.code;
-  try {
-    if (action === 'expiry-save') {
-      const dateInput = $('#expiry-date');
-      if (!dateInput.value) {
-        $('#expiry-msg').textContent = 'Odaberi datum.';
-        return;
-      }
-      await saveExpiry(code, dateInput.value, $('#expiry-kind').value, dateInput.dataset.monthOnly === '1');
-    } else if (action === 'expiry-clear') {
-      await LocalDb.removeExpiry(code);
-    }
-    renderExpiry(code);
-  } catch (err) {
-    $('#expiry-msg').textContent = 'Spremanje nije uspjelo: ' + (err && err.message ? err.message : err);
-  }
-});
-resultEl.addEventListener('change', (e) => {
-  if (e.target.id === 'expiry-date') e.target.dataset.monthOnly = '';
-  if (e.target.id !== 'expiry-file') return;
-  const file = e.target.files && e.target.files[0];
-  e.target.value = '';
-  if (file) ocrExpiry(file);
-});
-
 let currentObjectUrl = null;
 let lastResult = null;
 
@@ -517,9 +388,6 @@ function renderProduct(code, p, source) {
       </div>
       <div class="badges">${badges.join('')}</div>
     </section>`);
-
-  // Rok trajanja — uvijek, jer je to podatak s konkretnog pakiranja (popunjava se asinkrono).
-  parts.push(`<section class="card" id="expiry-card"><h2>Rok trajanja</h2><div id="expiry-body"><p class="muted">Učitavam…</p></div></section>`);
 
   // Zemlja proizvodnje — uvijek
   parts.push(section('Zemlja proizvodnje', originHtml(code, p)));
@@ -601,7 +469,6 @@ function renderProduct(code, p, source) {
     <p class="muted small">${footer}</p>`);
 
   resultEl.innerHTML = parts.join('');
-  renderExpiry(code);
   resultEl.dataset.code = code;
   lastResult = { code, product: p, source };
   resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -730,13 +597,6 @@ async function openEditor(code) {
   if (editorState && editorState.imageUrl) URL.revokeObjectURL(editorState.imageUrl);
   editorState = { code, existing: !!existing, imageBlob: existing ? existing.image_blob || null : null, remoteImage: p ? p.image_front_url || null : null, imageUrl: null };
   productToForm(code, p, type);
-  let expiry = null;
-  try { expiry = await LocalDb.getExpiry(code); } catch { /* bez lokalne baze */ }
-  if (expiry) {
-    field('expiry_date').value = expiry.date;
-    field('expiry_kind').value = expiry.kind;
-    editorState.expiryMonthOnly = !!expiry.monthOnly;
-  }
   renderEditorPhoto();
   $('#delete-btn').hidden = !existing;
   showView('editor');
@@ -776,12 +636,6 @@ function applyParsed(parsed) {
   if (parsed.country && !field('country_of_manufacture').value.trim()) {
     field('country_of_manufacture').value = parsed.country;
     filled.push('zemlja proizvodnje');
-  }
-  if (parsed.expiry && !field('expiry_date').value) {
-    field('expiry_date').value = parsed.expiry.date;
-    field('expiry_kind').value = parsed.expiry.kind;
-    editorState.expiryMonthOnly = parsed.expiry.monthOnly;
-    filled.push(parsed.expiry.sure ? 'rok trajanja' : 'rok trajanja (nesigurno — provjeri da nije datum proizvodnje)');
   }
   let nCount = 0;
   NUTRIENTS.forEach((x) => {
@@ -892,10 +746,6 @@ async function saveEditor(e) {
   }
   try {
     await LocalDb.put(product);
-    const expiryDate = field('expiry_date').value;
-    const prev = await LocalDb.getExpiry(product.code).catch(() => null);
-    const monthOnly = !!(prev && prev.date === expiryDate ? prev.monthOnly : editorState.expiryMonthOnly);
-    await saveExpiry(product.code, expiryDate, field('expiry_kind').value, monthOnly);
   } catch (err) {
     msg.classList.add('error');
     msg.textContent = 'Spremanje nije uspjelo (preglednik možda ne dopušta lokalnu pohranu): ' + (err && err.message ? err.message : err);
@@ -917,7 +767,6 @@ async function deleteLocal() {
 buildEditorControls();
 editorForm.addEventListener('submit', saveEditor);
 field('type').addEventListener('change', updateTypeSections);
-field('expiry_date').addEventListener('change', () => { editorState.expiryMonthOnly = false; });
 $('#cancel-btn').addEventListener('click', () => { showView('main'); });
 $('#delete-btn').addEventListener('click', deleteLocal);
 $('#ocr-btn').addEventListener('click', () => $('#ocr-file').click());

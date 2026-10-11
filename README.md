@@ -10,16 +10,11 @@ Ako proizvoda nema ni u jednoj bazi, podatke možeš unijeti sam — ručno ili 
 - sastojci (za kozmetiku INCI popis)
 - nutritivna tablica na 100 g/ml i po porciji, redoslijedom iz Uredbe — za hranu i hranu za ljubimce
 - Nutri-Score, NOVA skupina, aditivi (E-brojevi)
-- **rok trajanja** (uvijek) — s oznakom isteka: istekao / ističe uskoro / vrijedi još N dana
 - **zemlja proizvodnje** (uvijek) — uz mjesto proizvodnje, podrijetlo sastojaka i identifikacijsku oznaku objekta
 - uvjeti čuvanja, upute i upozorenja, pakiranje, kontakt proizvođača
 
-### Rok trajanja i zemlja proizvodnje — što je pouzdano
+### Zemlja proizvodnje — što je pouzdano
 
-- **Rok trajanja** je otisnut na svakom pakiranju posebno (ovisi o seriji) i **ne postoji ni u jednoj bazi**.
-  Upisuje se ručno ili očitava fotografijom (`📷 Očitaj s pakiranja`) i sprema na uređaju po bar kodu.
-  Razlikuju se „Upotrijebiti do” (nakon datuma hrana se smatra nesigurnom) i „Najbolje upotrijebiti do” (kvaliteta,
-  ne nužno sigurnost) — prema Uredbi (EU) br. 1169/2011. Datum u obliku mjesec/godina vrijedi do kraja mjeseca.
 - **Zemlja proizvodnje** u bazama je često prazna. Polje „Prodaje se u” (`countries`) **nije** zemlja proizvodnje.
   Ako nije poznata, upisuje se ručno ili očitava s deklaracije („Zemlja podrijetla”, „Proizvedeno u”, „Made in”).
 - **Prefiks bar koda** (npr. 385 = Hrvatska) prikazuje se samo informativno: označava GS1 organizaciju koja je
