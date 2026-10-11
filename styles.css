@@ -29,6 +29,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   margin: 0;
@@ -171,3 +172,51 @@ dl.facts dd { margin: 0; overflow-wrap: anywhere; }
   dl.facts { grid-template-columns: 1fr; gap: 0; }
   dl.facts dd { margin-bottom: 8px; }
 }
+
+/* ---------- Ručni unos ---------- */
+
+.small { font-size: .85rem; }
+.result-actions { margin: 0 0 8px; }
+.result-actions button { flex: 1; }
+.badge.local { background: var(--warn-bg); color: var(--warn-text); border-color: transparent; }
+
+.field { display: block; margin-bottom: 12px; color: var(--muted); font-size: .9rem; }
+.field input, .field textarea, .field select {
+  display: block; width: 100%; margin-top: 4px;
+  font: inherit; color: var(--text);
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--bg);
+}
+.field textarea { resize: vertical; }
+
+.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 12px; margin-bottom: 12px; }
+.check { display: flex; gap: 8px; align-items: flex-start; }
+.check input { margin-top: 4px; width: 18px; height: 18px; flex-shrink: 0; }
+#allergen-hint:empty { display: none; }
+#allergen-hint { margin-bottom: 12px; }
+
+.nutrient-inputs { display: grid; gap: 8px; }
+.nutrient-inputs label { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.nutrient-inputs label.sub-row span { padding-left: 16px; color: var(--muted); }
+.nutrient-inputs input {
+  width: 110px; flex-shrink: 0; text-align: right;
+  font: inherit; color: var(--text);
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg);
+}
+
+.photo-row { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.photo-row img { width: 72px; height: 72px; object-fit: contain; background: #fff; border-radius: 10px; border: 1px solid var(--border); }
+.button-like {
+  display: inline-block; cursor: pointer; color: var(--text);
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; background: var(--card);
+}
+
+progress { width: 100%; margin-top: 12px; accent-color: var(--accent); }
+.editor-actions { margin-bottom: 12px; }
+.editor-actions button { flex: 1; }
+button.danger { color: var(--danger-text); border-color: var(--danger-text); background: transparent; }
+button:disabled { opacity: .6; cursor: progress; }
+
+details summary { cursor: pointer; font-weight: 600; }
+.raw { margin-top: 10px; font-size: .85rem; color: var(--muted); }

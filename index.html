@@ -16,40 +16,140 @@
   </header>
 
   <main>
-    <section class="card" id="scanner-card">
-      <div class="video-wrap" id="video-wrap" hidden>
-        <video id="video" playsinline muted></video>
-        <div class="aim" aria-hidden="true"></div>
-      </div>
-      <div class="actions">
-        <button id="scan-btn" class="primary" type="button">📷 Skeniraj bar kod</button>
-        <button id="stop-btn" type="button" hidden>Zaustavi</button>
-      </div>
-      <form id="manual-form" class="manual" autocomplete="off">
-        <label for="manual-input">ili upiši broj ispod bar koda</label>
-        <div class="row">
-          <input id="manual-input" inputmode="numeric" pattern="[0-9]{8,14}" placeholder="npr. 3017624010701" required>
-          <button type="submit">Traži</button>
+    <div id="main-view">
+      <section class="card" id="scanner-card">
+        <div class="video-wrap" id="video-wrap" hidden>
+          <video id="video" playsinline muted></video>
+          <div class="aim" aria-hidden="true"></div>
+        </div>
+        <div class="actions">
+          <button id="scan-btn" class="primary" type="button">📷 Skeniraj bar kod</button>
+          <button id="stop-btn" type="button" hidden>Zaustavi</button>
+        </div>
+        <form id="manual-form" class="manual" autocomplete="off">
+          <label for="manual-input">ili upiši broj ispod bar koda</label>
+          <div class="row">
+            <input id="manual-input" inputmode="numeric" pattern="[0-9]{8,14}" placeholder="npr. 3017624010701" required>
+            <button type="submit">Traži</button>
+          </div>
+        </form>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section id="result" aria-live="polite"></section>
+
+      <section class="card" id="history-card" hidden>
+        <h2>Nedavno skenirano</h2>
+        <ul id="history" class="history"></ul>
+      </section>
+    </div>
+
+    <section id="editor" hidden>
+      <form id="editor-form" autocomplete="off" novalidate>
+        <section class="card">
+          <h2>Podaci s deklaracije</h2>
+          <p class="code" id="editor-code"></p>
+          <p class="muted small">Podaci se spremaju samo na ovom uređaju.</p>
+        </section>
+
+        <section class="card">
+          <h2>Skeniraj tekst s pakiranja</h2>
+          <p class="muted small">Fotografiraj deklaraciju (sastojke, nutritivnu tablicu…). Tekst se prepoznaje
+            na samom uređaju i automatski popunjava prazna polja. Za više strana pakiranja ponovi fotografiranje.</p>
+          <div class="actions">
+            <button type="button" id="ocr-btn" class="primary">📄 Fotografiraj deklaraciju</button>
+          </div>
+          <input type="file" id="ocr-file" accept="image/*" capture="environment" hidden>
+          <progress id="ocr-progress" max="1" value="0" hidden></progress>
+          <p id="ocr-status" class="status" role="status" aria-live="polite"></p>
+          <label class="field">Prepoznati tekst (možeš ga ispraviti)
+            <textarea name="raw_text" rows="5"></textarea>
+          </label>
+          <button type="button" id="reparse-btn">↻ Popuni prazna polja iz teksta</button>
+        </section>
+
+        <section class="card">
+          <h2>Osnovno</h2>
+          <label class="field">Vrsta proizvoda
+            <select name="type" id="type-select"></select>
+          </label>
+          <label class="field">Naziv *
+            <input name="product_name" required>
+          </label>
+          <label class="field">Marka / proizvođač
+            <input name="brands">
+          </label>
+          <label class="field">Neto količina
+            <input name="quantity" placeholder="npr. 500 g, 250 ml">
+          </label>
+          <div class="field">
+            <span>Fotografija proizvoda</span>
+            <div class="photo-row">
+              <img id="photo-preview" alt="" hidden>
+              <label class="button-like">📷 Odaberi / snimi
+                <input type="file" id="photo-file" accept="image/*" capture="environment" hidden>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Sastojci</h2>
+          <label class="field">Popis sastojaka
+            <textarea name="ingredients_text" rows="5"></textarea>
+          </label>
+        </section>
+
+        <section class="card" id="allergen-card">
+          <h2>Alergeni</h2>
+          <div id="allergen-boxes" class="checks"></div>
+          <p id="allergen-hint" class="alert warn small" aria-live="polite"></p>
+          <label class="field">Može sadržavati tragove
+            <input name="traces_text" placeholder="npr. Može sadržavati tragove orašastih plodova.">
+          </label>
+        </section>
+
+        <section class="card" id="nutrition-card">
+          <h2>Nutritivna vrijednost na 100 g/ml</h2>
+          <div id="nutrient-inputs" class="nutrient-inputs"></div>
+        </section>
+
+        <section class="card">
+          <h2>Ostalo</h2>
+          <label class="field">Kategorija <input name="categories"></label>
+          <label class="field">Podrijetlo <input name="origins"></label>
+          <label class="field">Mjesto proizvodnje <input name="manufacturing_places"></label>
+          <label class="field">Uvjeti čuvanja <input name="conservation_conditions"></label>
+          <label class="field">Upute za uporabu i upozorenja <textarea name="usage_text" rows="3"></textarea></label>
+          <label class="field">Proizvođač / uvoznik / kontakt <textarea name="customer_service" rows="2"></textarea></label>
+          <label class="field">Napomene <textarea name="notes" rows="2"></textarea></label>
+        </section>
+
+        <p id="editor-msg" class="status" role="status" aria-live="polite"></p>
+        <div class="actions editor-actions">
+          <button type="submit" class="primary">💾 Spremi</button>
+          <button type="button" id="cancel-btn">Odustani</button>
+        </div>
+        <div class="actions editor-actions">
+          <button type="button" id="delete-btn" class="danger" hidden>Obriši moje podatke</button>
         </div>
       </form>
-      <p id="status" class="status" role="status" aria-live="polite"></p>
-    </section>
-
-    <section id="result" aria-live="polite"></section>
-
-    <section class="card" id="history-card" hidden>
-      <h2>Nedavno skenirano</h2>
-      <ul id="history" class="history"></ul>
     </section>
   </main>
 
   <footer class="footer">
-    Podaci: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>
-    (ODbL licenca). Baza je otvorena i uređuju je korisnici, pa podaci mogu biti nepotpuni ili zastarjeli —
+    Podaci: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>,
+    <a href="https://world.openbeautyfacts.org" target="_blank" rel="noopener">Open Beauty Facts</a>,
+    <a href="https://world.openpetfoodfacts.org" target="_blank" rel="noopener">Open Pet Food Facts</a> i
+    <a href="https://world.openproductsfacts.org" target="_blank" rel="noopener">Open Products Facts</a>
+    (ODbL licenca). Baze su otvorene i uređuju ih korisnici, pa podaci mogu biti nepotpuni ili zastarjeli —
     za alergene i zdravstvene odluke uvijek provjeri deklaraciju na pakiranju.
   </footer>
 
   <script src="vendor/zxing-0.21.3.min.js"></script>
+  <script src="vendor/tesseract/tesseract.min.js"></script>
+  <script src="db.js"></script>
+  <script src="ocr.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

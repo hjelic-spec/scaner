@@ -1,7 +1,14 @@
 'use strict';
 
-// Open Food Facts API v2 — https://openfoodfacts.github.io/openfoodfacts-server/api/
-const API = 'https://world.openfoodfacts.org/api/v2/product/';
+// Baze iz obitelji Open Facts dijele isti API v2 — https://openfoodfacts.github.io/openfoodfacts-server/api/
+// Redoslijed je ujedno i prioritet kad se isti bar kod nađe u više baza.
+const SOURCES = [
+  { id: 'food', name: 'Open Food Facts', kind: 'Hrana i piće', host: 'https://world.openfoodfacts.org' },
+  { id: 'beauty', name: 'Open Beauty Facts', kind: 'Kozmetika i higijena', host: 'https://world.openbeautyfacts.org' },
+  { id: 'pet', name: 'Open Pet Food Facts', kind: 'Hrana za kućne ljubimce', host: 'https://world.openpetfoodfacts.org' },
+  { id: 'products', name: 'Open Products Facts', kind: 'Ostali proizvodi', host: 'https://world.openproductsfacts.org' },
+];
+const SOURCE_BY_ID = Object.fromEntries(SOURCES.map((s) => [s.id, s]));
 const FIELDS = [
   'code', 'product_name', 'product_name_hr', 'generic_name', 'generic_name_hr',
   'brands', 'quantity', 'serving_size', 'image_front_url',
@@ -181,34 +188,58 @@ function onDetected(code) {
 
 /* ---------- Dohvat podataka ---------- */
 
+let lookupSeq = 0;
+
+async function fetchFromSource(source, code) {
+  const res = await fetch(`${source.host}/api/v2/product/${encodeURIComponent(code)}.json?fields=${FIELDS}`);
+  // API za nepostojeći proizvod može vratiti HTTP 404 s JSON tijelom, pa tijelo čitamo u oba slučaja.
+  const data = await res.json().catch(() => null);
+  if (!data && !res.ok) throw new Error(`HTTP ${res.status}`);
+  return data && data.status === 1 && data.product ? data.product : null;
+}
+
 async function lookup(rawCode) {
   const code = String(rawCode).trim();
   if (!isValidGtin(code)) {
     setStatus(`„${code}“ nije ispravan EAN/UPC bar kod (kontrolna znamenka ne odgovara).`, true);
     return;
   }
-  setStatus(`Tražim ${code}…`);
+  const seq = ++lookupSeq;
+  showView('main');
   resultEl.innerHTML = '';
 
-  let data;
-  try {
-    const res = await fetch(`${API}${encodeURIComponent(code)}.json?fields=${FIELDS}`);
-    // API za nepostojeći proizvod može vratiti HTTP 404 s JSON tijelom, pa tijelo čitamo u oba slučaja.
-    data = await res.json().catch(() => null);
-    if (!data && !res.ok) throw new Error(`HTTP ${res.status}`);
-  } catch (err) {
-    setStatus('Greška pri dohvatu podataka. Provjeri internetsku vezu. (' + err.message + ')', true);
+  // 1) Vlastiti (ručno uneseni) podaci imaju prednost.
+  let local = null;
+  try { local = await LocalDb.get(code); } catch { /* IndexedDB nedostupan (npr. privatni način) */ }
+  if (seq !== lookupSeq) return;
+  if (local) {
+    setStatus('');
+    renderProduct(code, local, { id: local.type || 'products', local: true });
+    saveHistory(code, pickName(local));
     return;
   }
 
-  if (!data || data.status !== 1 || !data.product) {
+  // 2) Sve baze paralelno; uzima se prva po prioritetu u kojoj proizvod postoji.
+  setStatus(`Tražim ${code} u ${SOURCES.length} baze…`);
+  const results = await Promise.allSettled(SOURCES.map((s) => fetchFromSource(s, code)));
+  if (seq !== lookupSeq) return;
+
+  const hitIndex = results.findIndex((r) => r.status === 'fulfilled' && r.value);
+  const failed = SOURCES.filter((_, i) => results[i].status === 'rejected');
+
+  if (hitIndex === -1) {
+    if (failed.length === SOURCES.length) {
+      setStatus('Greška pri dohvatu podataka. Provjeri internetsku vezu.', true);
+      renderNotFound(code, failed);
+      return;
+    }
     setStatus('');
-    renderNotFound(code);
+    renderNotFound(code, failed);
     return;
   }
   setStatus('');
-  const product = data.product;
-  renderProduct(code, product);
+  const product = results[hitIndex].value;
+  renderProduct(code, product, SOURCES[hitIndex]);
   saveHistory(code, pickName(product));
 }
 
@@ -245,12 +276,22 @@ function splitList(str) {
   return (str || '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-function renderProduct(code, p) {
+let currentObjectUrl = null;
+let lastResult = null;
+
+function renderProduct(code, p, source) {
   const name = pickName(p);
+  const kind = source.id;
+  const isEdible = kind === 'food' || kind === 'pet';
   const parts = [];
 
+  if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+  currentObjectUrl = p.image_blob instanceof Blob ? URL.createObjectURL(p.image_blob) : null;
+  const imageUrl = currentObjectUrl || p.image_front_url;
+
   // Zaglavlje
-  const badges = [];
+  const badges = [`<span class="badge">${escapeHtml(SOURCE_BY_ID[kind] ? SOURCE_BY_ID[kind].kind : 'Proizvod')}</span>`];
+  if (source.local) badges.push('<span class="badge local">Ručno uneseno</span>');
   const ns = (p.nutriscore_grade || '').toLowerCase();
   if (/^[a-e]$/.test(ns)) badges.push(`<span class="badge ns-${ns}">Nutri-Score ${ns.toUpperCase()}</span>`);
   if (NOVA_HR[p.nova_group]) badges.push(`<span class="badge" title="${escapeHtml(NOVA_HR[p.nova_group])}">NOVA ${p.nova_group} · ${escapeHtml(NOVA_HR[p.nova_group])}</span>`);
@@ -258,7 +299,7 @@ function renderProduct(code, p) {
   parts.push(`
     <section class="card">
       <div class="product-head">
-        ${p.image_front_url ? `<img src="${escapeHtml(p.image_front_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
+        ${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ''}
         <div>
           <h2>${escapeHtml(name)}</h2>
           ${p.brands ? `<p class="sub">${escapeHtml(p.brands)}</p>` : ''}
@@ -266,24 +307,29 @@ function renderProduct(code, p) {
           <p class="code">EAN ${escapeHtml(code)}</p>
         </div>
       </div>
-      ${badges.length ? `<div class="badges">${badges.join('')}</div>` : ''}
+      <div class="badges">${badges.join('')}</div>
     </section>`);
 
-  // Alergeni
-  const allergens = (p.allergens_tags || []).map((t) => ALLERGENS_HR[t] || tagLabel(t));
-  const traces = (p.traces_tags || []).map((t) => ALLERGENS_HR[t] || tagLabel(t));
-  let allergenHtml = '';
-  if (allergens.length) allergenHtml += `<p class="alert danger"><strong>Sadrži:</strong> ${escapeHtml(allergens.join(', '))}</p>`;
-  if (traces.length) allergenHtml += `<p class="alert warn"><strong>Može sadržavati tragove:</strong> ${escapeHtml(traces.join(', '))}</p>`;
-  if (!allergenHtml) allergenHtml = '<p class="muted">Alergeni nisu uneseni u bazu — to <strong>ne znači</strong> da ih proizvod ne sadrži. Provjeri pakiranje.</p>';
-  parts.push(section('Alergeni', allergenHtml));
+  // Alergeni (samo hrana za ljude — Uredba 1169/2011)
+  if (kind === 'food') {
+    const allergens = (p.allergens_tags || []).map((t) => ALLERGENS_HR[t] || tagLabel(t));
+    const traces = (p.traces_tags || []).map((t) => ALLERGENS_HR[t] || tagLabel(t));
+    let allergenHtml = '';
+    if (allergens.length) allergenHtml += `<p class="alert danger"><strong>Sadrži:</strong> ${escapeHtml(allergens.join(', '))}</p>`;
+    if (traces.length) allergenHtml += `<p class="alert warn"><strong>Može sadržavati tragove:</strong> ${escapeHtml(traces.join(', '))}</p>`;
+    if (p.traces_text) allergenHtml += `<p class="alert warn">${escapeHtml(p.traces_text)}</p>`;
+    if (!allergenHtml) allergenHtml = '<p class="muted">Alergeni nisu uneseni — to <strong>ne znači</strong> da ih proizvod ne sadrži. Provjeri pakiranje.</p>';
+    parts.push(section('Alergeni', allergenHtml));
+  }
 
   // Sastojci
   const ingredients = p.ingredients_text_hr || p.ingredients_text;
-  const ingrNote = !p.ingredients_text_hr && p.ingredients_text ? '<p class="muted">Sastav nije dostupan na hrvatskom; prikazan je izvorni tekst.</p>' : '';
-  parts.push(section('Sastojci', ingredients
-    ? `${ingrNote}<p class="ingredients">${escapeHtml(ingredients)}</p>`
-    : '<p class="muted">Popis sastojaka nije unesen u bazu.</p>'));
+  const ingrNote = !source.local && !p.ingredients_text_hr && p.ingredients_text ? '<p class="muted">Sastav nije dostupan na hrvatskom; prikazan je izvorni tekst.</p>' : '';
+  if (ingredients || isEdible || kind === 'beauty') {
+    parts.push(section(kind === 'beauty' ? 'Sastojci (INCI)' : 'Sastojci', ingredients
+      ? `${ingrNote}<p class="ingredients">${escapeHtml(ingredients)}</p>`
+      : '<p class="muted">Popis sastojaka nije unesen.</p>'));
+  }
 
   // Nutritivna tablica
   const n = p.nutriments || {};
@@ -295,9 +341,11 @@ function renderProduct(code, p) {
     const cell = (v) => (v === null ? '—' : `${fmtNumber(v)} ${x.unit}`);
     return `<tr class="${x.sub ? 'sub-row' : ''}"><td>${escapeHtml(x.label)}</td><td>${cell(v100)}</td>${hasServing ? `<td>${cell(vSrv)}</td>` : ''}</tr>`;
   }).join('');
-  parts.push(section('Nutritivna vrijednost', rows
-    ? `<table class="nutri"><thead><tr><th></th><th>na 100 g/ml</th>${hasServing ? `<th>po porciji${p.serving_size ? ` (${escapeHtml(p.serving_size)})` : ''}</th>` : ''}</tr></thead><tbody>${rows}</tbody></table>`
-    : '<p class="muted">Nutritivne vrijednosti nisu unesene u bazu.</p>'));
+  if (rows || kind === 'food') {
+    parts.push(section('Nutritivna vrijednost', rows
+      ? `<table class="nutri"><thead><tr><th></th><th>na 100 g/ml</th>${hasServing ? `<th>po porciji${p.serving_size ? ` (${escapeHtml(p.serving_size)})` : ''}</th>` : ''}</tr></thead><tbody>${rows}</tbody></table>`
+      : '<p class="muted">Nutritivne vrijednosti nisu unesene.</p>'));
+  }
 
   // Aditivi
   const additives = (p.additives_tags || []).map(tagLabel);
@@ -305,35 +353,61 @@ function renderProduct(code, p) {
 
   // Ostali podaci s deklaracije
   const facts = [
-    ['Kategorija', splitList(p.categories).slice(-2).join(', ')],
+    ['Kategorija', source.local ? p.categories : splitList(p.categories).slice(-2).join(', ')],
     ['Oznake', p.labels],
-    ['Podrijetlo sastojaka', p.origins],
+    ['Podrijetlo', p.origins],
     ['Mjesto proizvodnje', p.manufacturing_places],
     ['Uvjeti čuvanja', p.conservation_conditions],
+    ['Upute i upozorenja', p.usage_text],
     ['Pakiranje', p.packaging],
     ['Prodaje se u', p.countries],
     ['Trgovine', p.stores],
-    ['Kontakt proizvođača', p.customer_service],
+    ['Proizvođač / kontakt', p.customer_service],
+    ['Napomene', p.notes],
   ].filter(([, v]) => v && String(v).trim());
   if (facts.length) {
     parts.push(section('Ostali podaci', `<dl class="facts">${facts.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join('')}</dl>`));
   }
 
-  const updated = p.last_modified_t ? new Date(p.last_modified_t * 1000).toLocaleDateString('hr-HR') : null;
-  parts.push(`<p class="muted" style="font-size:.85rem;margin:0 0 16px">
-    ${updated ? `Zadnja izmjena u bazi: ${escapeHtml(updated)} ` : ''}
-    <a href="https://world.openfoodfacts.org/product/${encodeURIComponent(code)}" target="_blank" rel="noopener">Otvori na Open Food Facts</a>
-    (možeš ispraviti ili dopuniti podatke).</p>`);
+  if (p.raw_text) {
+    parts.push(`<section class="card"><details><summary>Cijeli prepoznati tekst s deklaracije</summary><p class="ingredients raw">${escapeHtml(p.raw_text)}</p></details></section>`);
+  }
+
+  let footer;
+  if (source.local) {
+    const updated = p.updated ? new Date(p.updated).toLocaleDateString('hr-HR') : null;
+    footer = `Podaci su uneseni ručno${updated ? ` (${escapeHtml(updated)})` : ''} i spremljeni samo na ovom uređaju.`;
+  } else {
+    const updated = p.last_modified_t ? new Date(p.last_modified_t * 1000).toLocaleDateString('hr-HR') : null;
+    footer = `Izvor: ${escapeHtml(source.name)}.${updated ? ` Zadnja izmjena u bazi: ${escapeHtml(updated)}` : ''}
+      <a href="${source.host}/product/${encodeURIComponent(code)}" target="_blank" rel="noopener">Otvori u bazi</a>.`;
+  }
+  parts.push(`
+    <div class="actions result-actions">
+      <button type="button" data-action="edit" data-code="${escapeHtml(code)}">✏️ ${source.local ? 'Uredi' : 'Dopuni / ispravi ručno'}</button>
+    </div>
+    <p class="muted small">${footer}</p>`);
 
   resultEl.innerHTML = parts.join('');
+  resultEl.dataset.code = code;
+  lastResult = { code, product: p, source };
   resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-function renderNotFound(code) {
+function renderNotFound(code, failed) {
+  const failedNote = failed.length
+    ? `<p class="alert warn">Nisu dostupne: ${escapeHtml(failed.map((s) => s.name).join(', '))}. Proizvod je možda ondje — pokušaj ponovno kasnije.</p>`
+    : '';
   resultEl.innerHTML = section('Proizvod nije pronađen', `
-    <p>Bar kod <span class="code">${escapeHtml(code)}</span> još nije u bazi Open Food Facts.</p>
-    <p class="muted">Možeš ga dodati fotografiranjem deklaracije u aplikaciji ili na stranici
-    <a href="https://world.openfoodfacts.org/cgi/product.pl?type=search_or_add&code=${encodeURIComponent(code)}" target="_blank" rel="noopener">Open Food Facts</a>.</p>`);
+    <p>Bar kod <span class="code">${escapeHtml(code)}</span> nije pronađen ni u jednoj od baza
+    (${escapeHtml(SOURCES.map((s) => s.kind.toLowerCase()).join(', '))}).</p>
+    ${failedNote}
+    <p>Podatke možeš unijeti sam — ručno ili fotografiranjem deklaracije (prepoznavanje teksta).
+    Spremaju se na ovom uređaju i prikazat će se kad idući put skeniraš isti proizvod.</p>
+    <div class="actions">
+      <button type="button" class="primary" data-action="edit" data-code="${escapeHtml(code)}">➕ Unesi podatke s deklaracije</button>
+    </div>`);
+  lastResult = { code, product: null, source: null };
 }
 
 /* ---------- Povijest (lokalno u pregledniku) ---------- */
@@ -364,6 +438,272 @@ function renderHistory() {
       <span>${escapeHtml(h.name)}</span><span class="code">${escapeHtml(h.code)}</span>
     </button></li>`).join('');
 }
+
+/* ---------- Ručni unos i skeniranje teksta ---------- */
+
+const editorForm = $('#editor-form');
+const TEXT_FIELDS = [
+  'product_name', 'brands', 'quantity', 'ingredients_text', 'traces_text', 'categories', 'origins',
+  'manufacturing_places', 'conservation_conditions', 'usage_text', 'customer_service', 'notes', 'raw_text',
+];
+let editorState = null; // { code, imageBlob, imageUrl, existing }
+
+function showView(view) {
+  $('#main-view').hidden = view !== 'main';
+  $('#editor').hidden = view !== 'editor';
+  if (view !== 'main' && scanning) stopScan();
+  window.scrollTo(0, 0);
+}
+
+function buildEditorControls() {
+  $('#allergen-boxes').innerHTML = Object.entries(ALLERGENS_HR).map(([tag, label]) => `
+    <label class="check"><input type="checkbox" name="allergen" value="${tag}"> ${escapeHtml(label)}</label>`).join('');
+  $('#nutrient-inputs').innerHTML = NUTRIENTS.map((x) => `
+    <label class="${x.sub ? 'sub-row' : ''}"><span>${escapeHtml(x.label)} (${x.unit})</span>
+      <input name="n:${x.key}" inputmode="decimal" autocomplete="off"></label>`).join('');
+  $('#type-select').innerHTML = SOURCES.map((s) => `<option value="${s.id}">${escapeHtml(s.kind)}</option>`).join('');
+}
+
+function field(name) {
+  return editorForm.elements.namedItem(name);
+}
+
+function parseDecimal(value) {
+  const v = String(value || '').trim().replace(/\s/g, '').replace(',', '.');
+  if (!v) return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? n : NaN;
+}
+
+function updateTypeSections() {
+  const type = field('type').value;
+  $('#allergen-card').hidden = type !== 'food';
+  $('#nutrition-card').hidden = type !== 'food' && type !== 'pet';
+}
+
+// Pretvara proizvod iz baze ili lokalni zapis u vrijednosti obrasca.
+function productToForm(code, p, type) {
+  editorForm.reset();
+  $('#editor-code').textContent = `EAN ${code}`;
+  $('#allergen-hint').textContent = '';
+  $('#ocr-status').textContent = '';
+  field('type').value = type || 'food';
+  if (p) {
+    const values = {
+      ...p,
+      product_name: pickName(p) === 'Nepoznat naziv' ? '' : pickName(p),
+      ingredients_text: p.ingredients_text_hr || p.ingredients_text || '',
+      traces_text: p.traces_text || (p.traces_tags || []).map((t) => ALLERGENS_HR[t] || tagLabel(t)).join(', '),
+    };
+    TEXT_FIELDS.forEach((f) => { if (values[f]) field(f).value = values[f]; });
+    const tags = new Set(p.allergens_tags || []);
+    editorForm.querySelectorAll('input[name="allergen"]').forEach((cb) => { cb.checked = tags.has(cb.value); });
+    const n = p.nutriments || {};
+    NUTRIENTS.forEach((x) => {
+      const v = nutrientValue(n, x.key, '100g');
+      if (v !== null) field(`n:${x.key}`).value = String(v).replace('.', ',');
+    });
+  }
+  updateTypeSections();
+}
+
+async function openEditor(code) {
+  let existing = null;
+  try { existing = await LocalDb.get(code); } catch { /* bez lokalne baze */ }
+  const fromDb = lastResult && lastResult.code === code && !lastResult.source?.local ? lastResult : null;
+  const p = existing || (fromDb && fromDb.product) || null;
+  const type = existing ? existing.type : (fromDb && fromDb.source ? fromDb.source.id : 'food');
+
+  if (editorState && editorState.imageUrl) URL.revokeObjectURL(editorState.imageUrl);
+  editorState = { code, existing: !!existing, imageBlob: existing ? existing.image_blob || null : null, remoteImage: p ? p.image_front_url || null : null, imageUrl: null };
+  productToForm(code, p, type);
+  renderEditorPhoto();
+  $('#delete-btn').hidden = !existing;
+  showView('editor');
+}
+
+function renderEditorPhoto() {
+  const img = $('#photo-preview');
+  if (editorState.imageUrl) URL.revokeObjectURL(editorState.imageUrl);
+  editorState.imageUrl = editorState.imageBlob ? URL.createObjectURL(editorState.imageBlob) : null;
+  const src = editorState.imageUrl || editorState.remoteImage;
+  img.hidden = !src;
+  if (src) img.src = src;
+}
+
+async function resizeToBlob(file, maxSide = 800) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  if (bitmap.close) bitmap.close();
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.82));
+}
+
+// Popunjava samo prazna polja, da OCR ne pregazi ono što je korisnik već upisao.
+function applyParsed(parsed) {
+  const filled = [];
+  if (parsed.ingredients && !field('ingredients_text').value.trim()) {
+    field('ingredients_text').value = parsed.ingredients;
+    filled.push('sastojci');
+  }
+  if (parsed.traces && !field('traces_text').value.trim()) {
+    field('traces_text').value = parsed.traces;
+    filled.push('tragovi');
+  }
+  let nCount = 0;
+  NUTRIENTS.forEach((x) => {
+    const v = parsed.nutriments[x.key];
+    const input = field(`n:${x.key}`);
+    if (v != null && !input.value.trim()) { input.value = String(v).replace('.', ','); nCount++; }
+  });
+  if (nCount) filled.push(`${nCount} nutritivnih vrijednosti`);
+
+  const suggested = parsed.allergens.filter((tag) => {
+    const cb = editorForm.querySelector(`input[name="allergen"][value="${tag}"]`);
+    if (cb && !cb.checked) { cb.checked = true; return true; }
+    return false;
+  });
+  $('#allergen-hint').textContent = suggested.length
+    ? `Prema tekstu sastojaka označeno: ${suggested.map((t) => ALLERGENS_HR[t]).join(', ')}. Provjeri na pakiranju — na deklaraciji su alergeni podebljani, a prepoznavanje teksta to ne vidi.`
+    : '';
+  return filled;
+}
+
+async function runOcr(file) {
+  const status = $('#ocr-status');
+  const progress = $('#ocr-progress');
+  const btn = $('#ocr-btn');
+  btn.disabled = true;
+  progress.hidden = false;
+  progress.value = 0;
+  status.classList.remove('error');
+  status.textContent = 'Učitavam prepoznavanje teksta (prvi put može potrajati — preuzima se oko 10 MB)…';
+  try {
+    const { text, confidence } = await LabelOcr.recognize(file, (m) => {
+      if (m.status === 'recognizing text') {
+        status.textContent = 'Prepoznajem tekst…';
+        progress.value = m.progress;
+      }
+    });
+    if (!text.trim()) {
+      status.textContent = 'Na slici nije prepoznat tekst. Pokušaj bliže, oštrije i uz bolje svjetlo.';
+      return;
+    }
+    const raw = field('raw_text');
+    raw.value = raw.value.trim() ? `${raw.value.trim()}\n\n${text.trim()}` : text.trim();
+    const filled = applyParsed(LabelOcr.parseLabel(raw.value));
+    status.textContent = `Tekst prepoznat (pouzdanost ${Math.round(confidence)} %). `
+      + (filled.length ? `Popunjeno: ${filled.join(', ')}. ` : 'Polja nisu automatski prepoznata — prepiši ih iz teksta ispod. ')
+      + 'Obavezno provjeri sve vrijednosti.';
+  } catch (err) {
+    status.classList.add('error');
+    status.textContent = 'Prepoznavanje teksta nije uspjelo: ' + (err && err.message ? err.message : err);
+  } finally {
+    btn.disabled = false;
+    progress.hidden = true;
+  }
+}
+
+function formToProduct() {
+  const fd = new FormData(editorForm);
+  const product = { code: editorState.code, type: fd.get('type'), updated: Date.now() };
+  TEXT_FIELDS.forEach((f) => {
+    const v = String(fd.get(f) || '').trim();
+    if (v) product[f] = v;
+  });
+  if (product.type === 'food') product.allergens_tags = fd.getAll('allergen');
+  else delete product.traces_text;
+
+  if (product.type === 'food' || product.type === 'pet') {
+    const nutriments = {};
+    const bad = [];
+    NUTRIENTS.forEach((x) => {
+      const v = parseDecimal(fd.get(`n:${x.key}`));
+      if (Number.isNaN(v)) bad.push(x.label);
+      else if (v !== null) nutriments[`${x.key}_100g`] = v;
+    });
+    if (bad.length) throw new Error(`Neispravan broj: ${bad.join(', ')}`);
+    // Ako je upisana samo jedna jedinica energije, izračunaj drugu (1 kcal = 4,184 kJ).
+    if (nutriments['energy-kj_100g'] == null && nutriments['energy-kcal_100g'] != null) nutriments['energy-kj_100g'] = Math.round(nutriments['energy-kcal_100g'] * 4.184);
+    if (nutriments['energy-kcal_100g'] == null && nutriments['energy-kj_100g'] != null) nutriments['energy-kcal_100g'] = Math.round(nutriments['energy-kj_100g'] / 4.184);
+    if (Object.keys(nutriments).length) product.nutriments = nutriments;
+  }
+  if (editorState.imageBlob) product.image_blob = editorState.imageBlob;
+  else if (editorState.remoteImage) product.image_front_url = editorState.remoteImage;
+  return product;
+}
+
+async function saveEditor(e) {
+  e.preventDefault();
+  const msg = $('#editor-msg');
+  msg.classList.remove('error');
+  let product;
+  try {
+    product = formToProduct();
+  } catch (err) {
+    msg.classList.add('error');
+    msg.textContent = err.message;
+    return;
+  }
+  if (!product.product_name) {
+    msg.classList.add('error');
+    msg.textContent = 'Upiši barem naziv proizvoda.';
+    field('product_name').focus();
+    return;
+  }
+  try {
+    await LocalDb.put(product);
+  } catch (err) {
+    msg.classList.add('error');
+    msg.textContent = 'Spremanje nije uspjelo (preglednik možda ne dopušta lokalnu pohranu): ' + (err && err.message ? err.message : err);
+    return;
+  }
+  msg.textContent = '';
+  showView('main');
+  renderProduct(product.code, product, { id: product.type, local: true });
+  saveHistory(product.code, product.product_name);
+  setStatus('Spremljeno na ovom uređaju.');
+}
+
+async function deleteLocal() {
+  if (!editorState || !confirm('Obrisati ručno unesene podatke za ovaj proizvod?')) return;
+  try { await LocalDb.remove(editorState.code); } catch { /* već obrisano */ }
+  lookup(editorState.code);
+}
+
+buildEditorControls();
+editorForm.addEventListener('submit', saveEditor);
+field('type').addEventListener('change', updateTypeSections);
+$('#cancel-btn').addEventListener('click', () => { showView('main'); });
+$('#delete-btn').addEventListener('click', deleteLocal);
+$('#ocr-btn').addEventListener('click', () => $('#ocr-file').click());
+$('#ocr-file').addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (file) runOcr(file);
+});
+$('#reparse-btn').addEventListener('click', () => {
+  const filled = applyParsed(LabelOcr.parseLabel(field('raw_text').value));
+  $('#ocr-status').textContent = filled.length ? `Popunjeno: ${filled.join(', ')}.` : 'Ništa novo nije prepoznato (popunjavaju se samo prazna polja).';
+});
+$('#photo-file').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try {
+    editorState.imageBlob = await resizeToBlob(file);
+    renderEditorPhoto();
+  } catch {
+    $('#editor-msg').textContent = 'Fotografija se ne može učitati.';
+  }
+});
+resultEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action="edit"]');
+  if (btn) openEditor(btn.dataset.code);
+});
 
 /* ---------- Događaji ---------- */
 
