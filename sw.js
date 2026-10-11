@@ -2,10 +2,11 @@
 
 // Sprema ljusku aplikacije; podaci o proizvodima uvijek se dohvaćaju s mreže.
 // Tesseract jezgra i jezični podaci (~15 MB) ne spremaju se unaprijed — Tesseract ih sam sprema u IndexedDB pri prvoj uporabi.
-const CACHE = 'scaner-shell-v4';
+const CACHE = 'scaner-shell-v5';
 const SHELL = [
-  './', 'index.html', 'styles.css', 'app.js', 'db.js', 'ocr.js', 'icon.svg',
-  'manifest.webmanifest', 'vendor/zxing-0.21.3.min.js', 'vendor/tesseract/tesseract.min.js',
+  './', 'index.html', 'styles.css', 'config.js', 'countries.js', 'fields.js', 'api.js', 'app.js', 'db.js', 'ocr.js',
+  'icon.svg', 'manifest.webmanifest', 'privacy.html', 'vendor/zxing-0.21.3.min.js', 'vendor/supabase-2.117.2.min.js',
+  'vendor/tesseract/tesseract.min.js',
 ];
 
 self.addEventListener('install', (event) => {

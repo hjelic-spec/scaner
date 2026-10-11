@@ -1,0 +1,89 @@
+name: Android i baza
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  database:
+    name: Testovi baze (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Migracija i testovi moderacije
+        run: |
+          psql -v ON_ERROR_STOP=1 -q -c "create database t"
+          psql -v ON_ERROR_STOP=1 -q -d t -f supabase/tests/supabase_stub.sql
+          psql -v ON_ERROR_STOP=1 -q -d t -f supabase/migrations/0001_init.sql
+          psql -v ON_ERROR_STOP=1 -q -t -o /dev/null -d t -f supabase/tests/moderation_test.sql
+
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Web datoteke i Capacitor sync
+        run: |
+          npm ci
+          npm run android:sync
+      - name: Testna (debug) verzija
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skener-deklaracija-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+      # Potpisano izdanje za Google Play gradi se samo ako su postavljeni GitHub Secrets
+      # (Settings → Secrets and variables → Actions): ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+      # ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+      - name: Potpisano izdanje (AAB za Google Play)
+        if: ${{ github.event_name != 'pull_request' }}
+        working-directory: android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "Ključ za potpisivanje nije postavljen — preskačem izdanje za Google Play."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+          ./gradlew bundleRelease --no-daemon
+          rm -f "$RUNNER_TEMP/release.keystore"
+      - uses: actions/upload-artifact@v4
+        if: ${{ hashFiles('android/app/build/outputs/bundle/release/*.aab') != '' }}
+        with:
+          name: skener-deklaracija-release-aab
+          path: android/app/build/outputs/bundle/release/*.aab
+          retention-days: 30

@@ -1,0 +1,8 @@
+{
+  "appId": "hr.skener.deklaracija",
+  "appName": "Skener deklaracija",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  }
+}

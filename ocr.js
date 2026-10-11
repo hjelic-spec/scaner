@@ -116,14 +116,87 @@
     return nfc.slice(start, start + m[2].length).trim();
   }
 
+  /* ---------- Ostali podaci s deklaracije ---------- */
+
+  // Vrijednost iza oznake u istom retku (npr. „Proizvođač: Kraš d.d., Ravnice 48, Zagreb”).
+  // Regex se izvršava nad tekstom bez dijakritika, a isječak se vraća iz izvornog teksta.
+  function afterLabel(text, labelRe, maxLen = 160) {
+    const nfc = (text || '').normalize('NFC');
+    // Dopušta dodatak prije dvotočke: „Uvoznik za BiH: …”, „Importer for UK: …”.
+    const re = new RegExp('(?:^|[\\s.;])(?:' + labelRe + ')(?:\\s+(?:za|for)\\s+[^:\\n]{1,25}(?=:))?\\s*[:\\-]?\\s*([^\\n]{2,' + maxLen + '})', 'm');
+    const m = re.exec(fold(nfc));
+    if (!m) return '';
+    const start = m.index + m[0].length - m[1].length;
+    return nfc.slice(start, start + m[1].length).replace(/[\s.;,]+$/, '').trim();
+  }
+
+  // „Kraš d.d., Ravnice 48, 10000 Zagreb” → naziv do prvog zareza, ostatak je adresa.
+  function splitNameAddress(value) {
+    if (!value) return { name: '', address: '' };
+    const i = value.indexOf(',');
+    return i === -1 ? { name: value, address: '' } : { name: value.slice(0, i).trim(), address: value.slice(i + 1).trim() };
+  }
+
+  function findManufacturer(text) {
+    return splitNameAddress(afterLabel(text, 'proizvodac|proizvodi|proizveo|manufacturer|manufactured by|producer|hersteller'));
+  }
+
+  function findDistributor(text) {
+    return splitNameAddress(afterLabel(text,
+      'uvoznik|uvozi|distributer|distribuira|proizvedeno za|stavlja na trziste|importer|imported by|distributor|distributed by'));
+  }
+
+  function findStorage(text) {
+    const nfc = (text || '').normalize('NFC');
+    const m = /\b(cuvati|cuvajte|cuvat|store|keep)\b[^.\n]{3,150}\.?/.exec(fold(nfc));
+    return m ? nfc.slice(m.index, m.index + m[0].length).trim() : '';
+  }
+
+  function findAlcohol(text) {
+    const m = /(\d{1,2}(?:[.,]\d)?)\s*%\s*vol\b/.exec(fold(text || ''));
+    return m ? toNumber(m[1]) : null;
+  }
+
+  const AMOUNT = '(\\d+(?:[.,]\\d+)?\\s*(?:kg|g|mg|l|ml|cl|dl))\\b';
+
+  function findDrainedWeight(text) {
+    const m = new RegExp('(?:neto ocijedena masa|ocijedena masa|drained weight)\\s*[:.]?\\s*' + AMOUNT).exec(fold(text || ''));
+    return m ? m[1].replace(/\s+/g, ' ') : '';
+  }
+
+  function findQuantity(text) {
+    const folded = fold(text || '');
+    let m = new RegExp('(?:neto (?!ocijed)(?:kolicina|masa|kol\\.?|sadrzaj|volumen)?|net (?:weight|wt\\.?|quantity|content)|nazivna kolicina)\\s*[:.]?\\s*' + AMOUNT).exec(folded);
+    if (!m) m = new RegExp(AMOUNT + '\\s*\u212e').exec(folded); // znak ℮ (procijenjena količina)
+    return m ? m[1].replace(/\s+/g, ' ') : '';
+  }
+
+  // Ovalni žig: „HR 1234 EZ”, „FR 72.264.002 CE”, „DE BY 123 EG” (zemlja, broj objekta, oznaka EU).
+  function findIdentificationMark(text) {
+    const m = /\b([A-Z]{2})[\s-]?((?:[A-Z]{2}[\s-])?\d{1,6}(?:[.\-\s]\d{1,6}){0,3})[\s-]?(EZ|EC|EG|CE|EY|EK|EB|EU|WE|ES)\b/.exec(text || '');
+    return m ? `${m[1]} ${m[2].trim()} ${m[3]}` : '';
+  }
+
+  // Vraća prijedloge vrijednosti s ključevima polja iz fields.js (country_text se pretvara u ISO kod u aplikaciji).
   function parseLabel(text) {
     const ingredients = findIngredients(text);
+    const manufacturer = findManufacturer(text);
+    const distributor = findDistributor(text);
     return {
-      ingredients,
-      traces: findTraces(text),
+      ingredients_text: ingredients,
+      traces_text: findTraces(text),
       nutriments: findNutrition(text),
       allergens: suggestAllergens(ingredients),
-      country: findCountry(text),
+      country_text: findCountry(text),
+      manufacturer_name: manufacturer.name,
+      manufacturer_address: manufacturer.address,
+      distributor_name: distributor.name,
+      distributor_address: distributor.address,
+      storage_conditions: findStorage(text),
+      alcohol_percent: findAlcohol(text),
+      quantity: findQuantity(text),
+      drained_weight: findDrainedWeight(text),
+      identification_mark: findIdentificationMark(text),
     };
   }
 
@@ -170,7 +243,10 @@
     return { text: data.text || '', confidence: data.confidence };
   }
 
-  const api = { parseLabel, findIngredients, findNutrition, findTraces, suggestAllergens, findCountry, recognize, fold };
+  const api = {
+    parseLabel, findIngredients, findNutrition, findTraces, suggestAllergens, findCountry, findManufacturer,
+    findDistributor, findStorage, findAlcohol, findQuantity, findDrainedWeight, findIdentificationMark, recognize, fold,
+  };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LabelOcr = api;
 })(typeof self !== 'undefined' ? self : this);

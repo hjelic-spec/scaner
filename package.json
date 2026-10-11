@@ -1,0 +1,18 @@
+{
+  "name": "skener-deklaracija",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Skeniranje bar koda i prikaz podataka s deklaracije, sa zajedničkom bazom proizvoda.",
+  "scripts": {
+    "build:web": "node scripts/build-web.mjs",
+    "android:sync": "npm run build:web && npx cap sync android",
+    "android:open": "npx cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/core": "8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.2"
+  }
+}
