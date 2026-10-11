@@ -891,13 +891,16 @@ async function runOcr(file) {
   progress.hidden = false;
   progress.value = 0;
   status.classList.remove('error');
-  status.textContent = 'Učitavam prepoznavanje teksta (prvi put može potrajati — preuzima se oko 10 MB)…';
+  const native = Boolean(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  status.textContent = native
+    ? 'Pokrećem prepoznavanje teksta…'
+    : 'Pokrećem prepoznavanje teksta (prvi put se preuzima oko 10 MB, zatim radi bez interneta)…';
   try {
     const { text, confidence } = await LabelOcr.recognize(file, (m) => {
-      if (m.status === 'recognizing text') {
-        status.textContent = 'Prepoznajem tekst…';
-        progress.value = m.progress;
-      }
+      if (!m.label) return;
+      const pct = typeof m.progress === 'number' ? m.progress : 0;
+      status.textContent = `${m.label}… ${Math.round(pct * 100)} %`;
+      progress.value = pct;
     });
     if (!text.trim()) {
       status.textContent = 'Na slici nije prepoznat tekst. Pokušaj bliže, oštrije i uz bolje svjetlo.';

@@ -203,22 +203,65 @@
   /* ---------- OCR ---------- */
 
   let workerPromise = null;
+  let lastWorkerError = null;
+
+  // Faze iz Tesseractovog izvještaja o napretku, na hrvatskom (prikazuju se korisniku).
+  const STAGES = {
+    'loading tesseract core': 'Učitavam program za prepoznavanje teksta',
+    'initializing tesseract': 'Pokrećem prepoznavanje teksta',
+    'loading language traineddata': 'Učitavam hrvatski i engleski jezik',
+    'loading language traineddata (from cache)': 'Učitavam hrvatski i engleski jezik',
+    'initializing api': 'Pripremam prepoznavanje',
+    'recognizing text': 'Prepoznajem tekst',
+  };
+  const INIT_TIMEOUT_MS = 90000;
+  const RECOGNIZE_TIMEOUT_MS = 180000;
 
   function abs(path) {
-    // Tesseract radnik se pokreće iz blob: URL-a, pa su potrebne apsolutne adrese.
     return new URL(path, document.baseURI).href;
   }
 
+  function withTimeout(promise, ms, message) {
+    let timer;
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); }),
+    ]).finally(() => clearTimeout(timer));
+  }
+
+  function errorText(e) {
+    if (!e) return '';
+    if (typeof e === 'string') return e;
+    return e.message || String(e);
+  }
+
   function getWorker(onProgress) {
+    getWorker.onProgress = onProgress;
     if (!workerPromise) {
-      workerPromise = root.Tesseract.createWorker(['hrv', 'eng'], root.Tesseract.OEM.LSTM_ONLY, {
+      lastWorkerError = null;
+      let stage = 'pokretanje';
+      const created = root.Tesseract.createWorker(['hrv', 'eng'], root.Tesseract.OEM.LSTM_ONLY, {
         workerPath: abs('vendor/tesseract/worker.min.js'),
         corePath: abs('vendor/tesseract/core/'),
         langPath: abs('vendor/tesseract/lang'),
-        logger: (m) => { if (getWorker.onProgress) getWorker.onProgress(m); },
-      }).catch((err) => { workerPromise = null; throw err; });
+        // Pozadinski proces se učitava izravno s adrese aplikacije, a ne iz blob: URL-a — u Android
+        // WebViewu (Capacitor) blob-radnik zna tiho zapeti pri učitavanju skripti.
+        workerBlobURL: false,
+        // Bez ovoga Tesseract grešku iz radnika baca kao neuhvaćenu iznimku umjesto da je javi.
+        errorHandler: (e) => { lastWorkerError = e; },
+        logger: (m) => {
+          if (m && m.status) stage = STAGES[m.status] || m.status;
+          if (getWorker.onProgress) getWorker.onProgress({ ...m, label: STAGES[m.status] || m.status });
+        },
+      });
+      workerPromise = withTimeout(created, INIT_TIMEOUT_MS, 'isteklo vrijeme')
+        .catch((err) => {
+          workerPromise = null;
+          created.then((w) => w.terminate()).catch(() => {});
+          const detail = errorText(lastWorkerError) || errorText(err);
+          throw new Error(`Prepoznavanje teksta se nije pokrenulo (zapelo kod: ${stage}). ${detail}`.trim());
+        });
     }
-    getWorker.onProgress = onProgress;
     return workerPromise;
   }
 
@@ -238,8 +281,10 @@
 
   async function recognize(file, onProgress) {
     const worker = await getWorker(onProgress);
+    if (onProgress) onProgress({ status: 'preparing', label: 'Pripremam fotografiju', progress: 0 });
     const canvas = await prepareImage(file);
-    const { data } = await worker.recognize(canvas);
+    const { data } = await withTimeout(worker.recognize(canvas), RECOGNIZE_TIMEOUT_MS,
+      'Prepoznavanje traje predugo. Pokušaj s manjim isječkom deklaracije.');
     return { text: data.text || '', confidence: data.confidence };
   }
 
