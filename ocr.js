@@ -240,22 +240,35 @@
     if (!workerPromise) {
       lastWorkerError = null;
       let stage = 'pokretanje';
+      // Tesseract pri neuspjelom učitavanju jezika ne odbija obećanje nego čeka zauvijek,
+      // pa grešku iz errorHandlera prosljeđujemo odmah.
+      let failInit = null;
+      const initFailed = new Promise((_, reject) => { failInit = reject; });
       const created = root.Tesseract.createWorker(['hrv', 'eng'], root.Tesseract.OEM.LSTM_ONLY, {
         workerPath: abs('vendor/tesseract/worker.min.js'),
         corePath: abs('vendor/tesseract/core/'),
         langPath: abs('vendor/tesseract/lang'),
+        // Datoteke su komprimirane (gzip), ali namjerno BEZ nastavka .gz: Androidov alat za pakiranje
+        // datoteke s nastavkom .gz raspakira i preimenuje, pa ih aplikacija ne bi našla. Tesseract
+        // komprimiranost prepoznaje po sadržaju, a gzip: false znači samo da adresi ne dodaje „.gz”.
+        gzip: false,
         // Pozadinski proces se učitava izravno s adrese aplikacije, a ne iz blob: URL-a — u Android
         // WebViewu (Capacitor) blob-radnik zna tiho zapeti pri učitavanju skripti.
         workerBlobURL: false,
         // Bez ovoga Tesseract grešku iz radnika baca kao neuhvaćenu iznimku umjesto da je javi.
-        errorHandler: (e) => { lastWorkerError = e; },
+        errorHandler: (e) => {
+          lastWorkerError = e;
+          if (failInit) failInit(new Error(errorText(e)));
+        },
         logger: (m) => {
           if (m && m.status) stage = STAGES[m.status] || m.status;
           if (getWorker.onProgress) getWorker.onProgress({ ...m, label: STAGES[m.status] || m.status });
         },
       });
-      workerPromise = withTimeout(created, INIT_TIMEOUT_MS, 'isteklo vrijeme')
+      workerPromise = withTimeout(Promise.race([created, initFailed]), INIT_TIMEOUT_MS, 'isteklo vrijeme')
+        .then((w) => { failInit = null; return w; })
         .catch((err) => {
+          failInit = null;
           workerPromise = null;
           created.then((w) => w.terminate()).catch(() => {});
           const detail = errorText(lastWorkerError) || errorText(err);

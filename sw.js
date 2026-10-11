@@ -1,7 +1,7 @@
 'use strict';
 
 // Sprema ljusku aplikacije; podaci o proizvodima uvijek se dohvaćaju s mreže.
-// Tesseract jezgra i jezični podaci (~15 MB) ne spremaju se unaprijed — Tesseract ih sam sprema u IndexedDB pri prvoj uporabi.
+// Tesseract jezgra i jezični podaci (~17 MB) ne spremaju se unaprijed — Tesseract ih sam sprema u IndexedDB pri prvoj uporabi.
 const CACHE = 'scaner-shell-v5';
 const SHELL = [
   './', 'index.html', 'styles.css', 'config.js', 'countries.js', 'fields.js', 'api.js', 'app.js', 'db.js', 'ocr.js',
