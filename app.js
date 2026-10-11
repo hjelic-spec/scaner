@@ -17,7 +17,7 @@ const FIELDS = [
   'nutriments', 'nutriscore_grade', 'nova_group',
   'categories', 'labels', 'origins', 'manufacturing_places',
   'countries', 'packaging', 'stores', 'conservation_conditions', 'customer_service',
-  'last_modified_t',
+  'emb_codes', 'last_modified_t',
 ].join(',');
 
 // 14 alergena iz Priloga II. Uredbe (EU) br. 1169/2011, nazivi oznaka kako ih koristi Open Food Facts.
@@ -50,6 +50,60 @@ const NUTRIENTS = [
   { key: 'proteins', label: 'Bjelančevine', unit: 'g' },
   { key: 'salt', label: 'Sol', unit: 'g' },
 ];
+
+// GS1 prefiksi (prve 3 znamenke EAN-13) — https://www.gs1.org/standards/id-keys/company-prefix
+// PAŽNJA: prefiks označava nacionalnu GS1 organizaciju koja je dodijelila broj, NE zemlju proizvodnje.
+const GS1_PREFIXES = [
+  [0, 19, 'SAD i Kanada'], [30, 39, 'SAD i Kanada'], [60, 139, 'SAD i Kanada'],
+  [300, 379, 'Francuska'], [380, 380, 'Bugarska'], [383, 383, 'Slovenija'], [385, 385, 'Hrvatska'],
+  [387, 387, 'Bosna i Hercegovina'], [389, 389, 'Crna Gora'], [400, 440, 'Njemačka'],
+  [450, 459, 'Japan'], [490, 499, 'Japan'], [460, 469, 'Rusija'], [471, 471, 'Tajvan'],
+  [474, 474, 'Estonija'], [475, 475, 'Latvija'], [477, 477, 'Litva'], [481, 481, 'Bjelorusija'],
+  [482, 482, 'Ukrajina'], [484, 484, 'Moldavija'], [489, 489, 'Hong Kong'],
+  [500, 509, 'Ujedinjeno Kraljevstvo'], [520, 521, 'Grčka'], [529, 529, 'Cipar'], [530, 530, 'Albanija'],
+  [531, 531, 'Sjeverna Makedonija'], [535, 535, 'Malta'], [539, 539, 'Irska'],
+  [540, 549, 'Belgija i Luksemburg'], [560, 560, 'Portugal'], [569, 569, 'Island'], [570, 579, 'Danska'],
+  [590, 590, 'Poljska'], [594, 594, 'Rumunjska'], [599, 599, 'Mađarska'], [600, 601, 'Južna Afrika'],
+  [640, 649, 'Finska'], [690, 699, 'Kina'], [700, 709, 'Norveška'], [729, 729, 'Izrael'],
+  [730, 739, 'Švedska'], [750, 750, 'Meksiko'], [760, 769, 'Švicarska'], [779, 779, 'Argentina'],
+  [780, 780, 'Čile'], [789, 790, 'Brazil'], [800, 839, 'Italija'], [840, 849, 'Španjolska'],
+  [858, 858, 'Slovačka'], [859, 859, 'Češka'], [860, 860, 'Srbija'], [868, 869, 'Turska'],
+  [870, 879, 'Nizozemska'], [880, 880, 'Južna Koreja'], [885, 885, 'Tajland'], [888, 888, 'Singapur'],
+  [890, 890, 'Indija'], [893, 893, 'Vijetnam'], [899, 899, 'Indonezija'], [900, 919, 'Austrija'],
+  [930, 939, 'Australija'], [940, 949, 'Novi Zeland'], [955, 955, 'Malezija'],
+];
+
+function gs1Country(code) {
+  // UPC-A (12 znamenki) je EAN-13 s vodećom nulom; EAN-8 i GTIN-14 imaju drugačiju strukturu.
+  const ean13 = code.length === 12 ? '0' + code : code;
+  if (ean13.length !== 13) return null;
+  const prefix = Number(ean13.slice(0, 3));
+  if (prefix >= 200 && prefix <= 299) return { internal: true };
+  const hit = GS1_PREFIXES.find(([a, b]) => prefix >= a && prefix <= b);
+  return hit ? { name: hit[2] } : null;
+}
+
+// Identifikacijska oznaka objekta (npr. „HR 1234 EZ”, „FR 72.264.002 CE”) za proizvode životinjskog
+// podrijetla — prve dvije slova su ISO oznaka zemlje objekta koji je proizvod zadnji obradio/pakirao.
+const regionNames = (() => {
+  try { return new Intl.DisplayNames(['hr'], { type: 'region' }); } catch { return null; }
+})();
+
+function embCountries(embCodes) {
+  return splitList(embCodes).map((c) => {
+    const iso = /^([A-Z]{2})[\s-]/.exec(c.trim().toUpperCase());
+    let country = null;
+    if (iso && regionNames) {
+      try { country = regionNames.of(iso[1] === 'UK' ? 'GB' : iso[1]); } catch { /* nepoznat kod */ }
+    }
+    return { code: c, country: country && country !== iso[1] ? country : null };
+  });
+}
+
+const EXPIRY_KIND = {
+  best_before: 'Najbolje upotrijebiti do',
+  use_by: 'Upotrijebiti do',
+};
 
 const NOVA_HR = {
   1: 'Neprerađena ili minimalno prerađena hrana',
@@ -276,6 +330,160 @@ function splitList(str) {
   return (str || '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+function originHtml(code, p) {
+  const rows = [
+    ['Zemlja proizvodnje', p.country_of_manufacture],
+    ['Mjesto proizvodnje', p.manufacturing_places],
+    ['Podrijetlo sastojaka', p.origins],
+  ].filter(([, v]) => v && String(v).trim());
+  const emb = embCountries(p.emb_codes);
+  if (emb.length) {
+    rows.push(['Identifikacijska oznaka objekta', emb.map((e) => (e.country ? `${e.code} (${e.country})` : e.code)).join(', ')]);
+  }
+  let html = rows.length
+    ? `<dl class="facts">${rows.map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`).join('')}</dl>`
+    : '';
+  if (!p.country_of_manufacture && !p.manufacturing_places) {
+    html += `<p class="muted">Zemlja proizvodnje nije navedena. Na pakiranju potraži „Proizvedeno u”, „Zemlja podrijetla”
+      ili „Made in” i upiši je preko gumba ✏️ ispod (ili fotografiraj deklaraciju).</p>`;
+  }
+  if (emb.length) {
+    html += '<p class="muted small">Identifikacijska oznaka (ovalni žig) označava zemlju objekta koji je proizvod životinjskog podrijetla zadnji obradio ili pakirao.</p>';
+  }
+  const gs1 = gs1Country(code);
+  if (gs1 && gs1.internal) {
+    html += '<p class="muted small">Ovo je interni bar kod trgovine (prefiks 2xx) — iz njega se ne može odrediti podrijetlo.</p>';
+  } else if (gs1) {
+    html += `<p class="muted small">Bar kod je dodijelila GS1 organizacija: <strong>${escapeHtml(gs1.name)}</strong> (prefiks ${escapeHtml(code.padStart(13, '0').slice(0, 3))}).
+      To <strong>nije</strong> dokaz zemlje proizvodnje — tvrtke koriste bar kod zemlje u kojoj su registrirane, bez obzira gdje se proizvod radi.</p>`;
+  }
+  return html;
+}
+
+/* ---------- Rok trajanja (po pakiranju, lokalno) ---------- */
+
+function daysUntil(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const target = new Date(y, m - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((target - today) / 86400000);
+}
+
+function fmtDate(iso, monthOnly) {
+  const [y, m, d] = iso.split('-');
+  return monthOnly ? `kraj ${m}/${y}` : `${Number(d)}. ${Number(m)}. ${y}.`;
+}
+
+function expiryStatusHtml(entry) {
+  const days = daysUntil(entry.date);
+  const label = `${EXPIRY_KIND[entry.kind] || EXPIRY_KIND.best_before}: <strong>${escapeHtml(fmtDate(entry.date, entry.monthOnly))}</strong>`;
+  let cls = 'ok';
+  let text;
+  if (days < 0) {
+    cls = 'danger';
+    text = `Istekao prije ${-days} ${-days === 1 ? 'dan' : 'dana'}.`;
+    text += entry.kind === 'use_by'
+      ? ' Ne konzumirati — nakon roka „upotrijebiti do” hrana se smatra nesigurnom.'
+      : ' Nakon roka „najbolje upotrijebiti do” proizvod može biti i dalje siguran ako je neoštećen i pravilno čuvan, ali proizvođač više ne jamči kvalitetu.';
+  } else if (days === 0) {
+    cls = 'warn';
+    text = 'Ističe danas.';
+  } else if (days <= 3) {
+    cls = 'warn';
+    text = `Ističe za ${days} ${days === 1 ? 'dan' : 'dana'}.`;
+  } else {
+    text = `Vrijedi još ${days} dana.`;
+  }
+  return `<p class="alert ${cls}">${label}<br>${escapeHtml(text)}</p>`;
+}
+
+async function renderExpiry(code) {
+  let entry = null;
+  try { entry = await LocalDb.getExpiry(code); } catch { /* bez lokalne baze */ }
+  const body = document.querySelector('#expiry-body');
+  if (!body || resultEl.dataset.code !== code) return;
+  body.innerHTML = `
+    ${entry ? expiryStatusHtml(entry) : '<p class="muted">Rok trajanja ovisi o pakiranju i ne postoji u bazama. Upiši ga ili ga očitaj fotografijom s pakiranja.</p>'}
+    <div class="expiry-form">
+      <select id="expiry-kind" aria-label="Vrsta roka">
+        ${Object.entries(EXPIRY_KIND).map(([k, v]) => `<option value="${k}"${entry && entry.kind === k ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('')}
+      </select>
+      <input type="date" id="expiry-date" aria-label="Datum" value="${entry ? escapeHtml(entry.date) : ''}">
+    </div>
+    <div class="actions expiry-actions">
+      <button type="button" data-action="expiry-ocr">📷 Očitaj s pakiranja</button>
+      <button type="button" class="primary" data-action="expiry-save" data-code="${escapeHtml(code)}">Spremi rok</button>
+    </div>
+    ${entry ? `<button type="button" class="link" data-action="expiry-clear" data-code="${escapeHtml(code)}">Ukloni rok</button>` : ''}
+    <input type="file" id="expiry-file" accept="image/*" capture="environment" hidden>
+    <p id="expiry-msg" class="status small" role="status" aria-live="polite"></p>`;
+}
+
+async function saveExpiry(code, date, kind, monthOnly = false) {
+  if (!date) {
+    await LocalDb.removeExpiry(code);
+    return;
+  }
+  await LocalDb.putExpiry({ code, date, kind, monthOnly, updated: Date.now() });
+}
+
+async function ocrExpiry(file) {
+  const msg = $('#expiry-msg');
+  msg.classList.remove('error');
+  msg.textContent = 'Prepoznajem datum… (prvi put se preuzima oko 10 MB)';
+  try {
+    const { text } = await LabelOcr.recognize(file, (m) => {
+      if (m.status === 'recognizing text') msg.textContent = `Prepoznajem datum… ${Math.round(m.progress * 100)} %`;
+    });
+    const found = LabelOcr.findExpiry(text);
+    if (!found) {
+      msg.textContent = 'Datum nije prepoznat. Fotografiraj izbliza samo datum, uz dobro svjetlo, ili ga upiši ručno.';
+      return;
+    }
+    $('#expiry-date').value = found.date;
+    $('#expiry-kind').value = found.kind;
+    $('#expiry-date').dataset.monthOnly = found.monthOnly ? '1' : '';
+    const shown = fmtDate(found.date, found.monthOnly);
+    msg.textContent = `Prepoznato: ${EXPIRY_KIND[found.kind]} ${shown}${shown.endsWith('.') ? '' : '.'}`
+      + (found.sure ? '' : ' Uz datum nije pronađen natpis roka — možda je to datum proizvodnje.')
+      + ' Provjeri pa pritisni „Spremi rok”.';
+  } catch (err) {
+    msg.classList.add('error');
+    msg.textContent = 'Prepoznavanje nije uspjelo: ' + (err && err.message ? err.message : err);
+  }
+}
+
+resultEl.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action^="expiry-"]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === 'expiry-ocr') { $('#expiry-file').click(); return; }
+  const code = btn.dataset.code;
+  try {
+    if (action === 'expiry-save') {
+      const dateInput = $('#expiry-date');
+      if (!dateInput.value) {
+        $('#expiry-msg').textContent = 'Odaberi datum.';
+        return;
+      }
+      await saveExpiry(code, dateInput.value, $('#expiry-kind').value, dateInput.dataset.monthOnly === '1');
+    } else if (action === 'expiry-clear') {
+      await LocalDb.removeExpiry(code);
+    }
+    renderExpiry(code);
+  } catch (err) {
+    $('#expiry-msg').textContent = 'Spremanje nije uspjelo: ' + (err && err.message ? err.message : err);
+  }
+});
+resultEl.addEventListener('change', (e) => {
+  if (e.target.id === 'expiry-date') e.target.dataset.monthOnly = '';
+  if (e.target.id !== 'expiry-file') return;
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (file) ocrExpiry(file);
+});
+
 let currentObjectUrl = null;
 let lastResult = null;
 
@@ -309,6 +517,12 @@ function renderProduct(code, p, source) {
       </div>
       <div class="badges">${badges.join('')}</div>
     </section>`);
+
+  // Rok trajanja — uvijek, jer je to podatak s konkretnog pakiranja (popunjava se asinkrono).
+  parts.push(`<section class="card" id="expiry-card"><h2>Rok trajanja</h2><div id="expiry-body"><p class="muted">Učitavam…</p></div></section>`);
+
+  // Zemlja proizvodnje — uvijek
+  parts.push(section('Zemlja proizvodnje', originHtml(code, p)));
 
   // Alergeni (samo hrana za ljude — Uredba 1169/2011)
   if (kind === 'food') {
@@ -355,8 +569,6 @@ function renderProduct(code, p, source) {
   const facts = [
     ['Kategorija', source.local ? p.categories : splitList(p.categories).slice(-2).join(', ')],
     ['Oznake', p.labels],
-    ['Podrijetlo', p.origins],
-    ['Mjesto proizvodnje', p.manufacturing_places],
     ['Uvjeti čuvanja', p.conservation_conditions],
     ['Upute i upozorenja', p.usage_text],
     ['Pakiranje', p.packaging],
@@ -389,6 +601,7 @@ function renderProduct(code, p, source) {
     <p class="muted small">${footer}</p>`);
 
   resultEl.innerHTML = parts.join('');
+  renderExpiry(code);
   resultEl.dataset.code = code;
   lastResult = { code, product: p, source };
   resultEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -444,7 +657,7 @@ function renderHistory() {
 const editorForm = $('#editor-form');
 const TEXT_FIELDS = [
   'product_name', 'brands', 'quantity', 'ingredients_text', 'traces_text', 'categories', 'origins',
-  'manufacturing_places', 'conservation_conditions', 'usage_text', 'customer_service', 'notes', 'raw_text',
+  'country_of_manufacture', 'manufacturing_places', 'conservation_conditions', 'usage_text', 'customer_service', 'notes', 'raw_text',
 ];
 let editorState = null; // { code, imageBlob, imageUrl, existing }
 
@@ -517,6 +730,13 @@ async function openEditor(code) {
   if (editorState && editorState.imageUrl) URL.revokeObjectURL(editorState.imageUrl);
   editorState = { code, existing: !!existing, imageBlob: existing ? existing.image_blob || null : null, remoteImage: p ? p.image_front_url || null : null, imageUrl: null };
   productToForm(code, p, type);
+  let expiry = null;
+  try { expiry = await LocalDb.getExpiry(code); } catch { /* bez lokalne baze */ }
+  if (expiry) {
+    field('expiry_date').value = expiry.date;
+    field('expiry_kind').value = expiry.kind;
+    editorState.expiryMonthOnly = !!expiry.monthOnly;
+  }
   renderEditorPhoto();
   $('#delete-btn').hidden = !existing;
   showView('editor');
@@ -553,13 +773,29 @@ function applyParsed(parsed) {
     field('traces_text').value = parsed.traces;
     filled.push('tragovi');
   }
+  if (parsed.country && !field('country_of_manufacture').value.trim()) {
+    field('country_of_manufacture').value = parsed.country;
+    filled.push('zemlja proizvodnje');
+  }
+  if (parsed.expiry && !field('expiry_date').value) {
+    field('expiry_date').value = parsed.expiry.date;
+    field('expiry_kind').value = parsed.expiry.kind;
+    editorState.expiryMonthOnly = parsed.expiry.monthOnly;
+    filled.push(parsed.expiry.sure ? 'rok trajanja' : 'rok trajanja (nesigurno — provjeri da nije datum proizvodnje)');
+  }
   let nCount = 0;
   NUTRIENTS.forEach((x) => {
     const v = parsed.nutriments[x.key];
     const input = field(`n:${x.key}`);
     if (v != null && !input.value.trim()) { input.value = String(v).replace('.', ','); nCount++; }
   });
-  if (nCount) filled.push(`${nCount} nutritivnih vrijednosti`);
+  if (nCount) {
+    const m10 = nCount % 10;
+    const m100 = nCount % 100;
+    const word = m10 === 1 && m100 !== 11 ? 'nutritivna vrijednost'
+      : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? 'nutritivne vrijednosti' : 'nutritivnih vrijednosti';
+    filled.push(`${nCount} ${word}`);
+  }
 
   const suggested = parsed.allergens.filter((tag) => {
     const cb = editorForm.querySelector(`input[name="allergen"][value="${tag}"]`);
@@ -656,6 +892,10 @@ async function saveEditor(e) {
   }
   try {
     await LocalDb.put(product);
+    const expiryDate = field('expiry_date').value;
+    const prev = await LocalDb.getExpiry(product.code).catch(() => null);
+    const monthOnly = !!(prev && prev.date === expiryDate ? prev.monthOnly : editorState.expiryMonthOnly);
+    await saveExpiry(product.code, expiryDate, field('expiry_kind').value, monthOnly);
   } catch (err) {
     msg.classList.add('error');
     msg.textContent = 'Spremanje nije uspjelo (preglednik možda ne dopušta lokalnu pohranu): ' + (err && err.message ? err.message : err);
@@ -677,6 +917,7 @@ async function deleteLocal() {
 buildEditorControls();
 editorForm.addEventListener('submit', saveEditor);
 field('type').addEventListener('change', updateTypeSections);
+field('expiry_date').addEventListener('change', () => { editorState.expiryMonthOnly = false; });
 $('#cancel-btn').addEventListener('click', () => { showView('main'); });
 $('#delete-btn').addEventListener('click', deleteLocal);
 $('#ocr-btn').addEventListener('click', () => $('#ocr-file').click());

@@ -10,6 +10,8 @@
   --warn-text: #7a4a00;
   --danger-bg: #fde8e8;
   --danger-text: #8a1c1c;
+  --ok-bg: #e3f4ea;
+  --ok-text: #14532d;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -25,6 +27,8 @@
     --warn-text: #f3cf8c;
     --danger-bg: #3d1a1a;
     --danger-text: #f3b0b0;
+    --ok-bg: #16301f;
+    --ok-text: #a7e3bd;
   }
 }
 
@@ -220,3 +224,15 @@ button:disabled { opacity: .6; cursor: progress; }
 
 details summary { cursor: pointer; font-weight: 600; }
 .raw { margin-top: 10px; font-size: .85rem; color: var(--muted); }
+
+/* ---------- Rok trajanja ---------- */
+
+.alert.ok { background: var(--ok-bg); color: var(--ok-text); }
+.expiry-form { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.expiry-form select, .expiry-form input {
+  flex: 1 1 160px; min-width: 0;
+  font: inherit; color: var(--text);
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg);
+}
+.expiry-actions button { flex: 1; }
+button.link { border: 0; background: none; color: var(--danger-text); padding: 8px 0; text-decoration: underline; }

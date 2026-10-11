@@ -103,6 +103,79 @@
     return Object.keys(ALLERGEN_KEYWORDS).filter((tag) => ALLERGEN_KEYWORDS[tag].test(folded));
   }
 
+  /* ---------- Rok trajanja ---------- */
+
+  // Redoslijed je bitan: „najbolje upotrijebiti do” mora se provjeriti prije „upotrijebiti do”.
+  const EXPIRY_KEYWORDS = [
+    [/najbolje upotrijebiti (?:do|prije)|best before|bbe?\b|mindestens haltbar|minimum durability/, 'best_before'],
+    [/upotrijebiti do|use by|verbrauchen bis/, 'use_by'],
+    [/rok trajanja|rok upotrebe|exp(?:iry|\.)?\b|istek/, 'best_before'],
+  ];
+
+  function isoDate(y, m, d) {
+    const date = new Date(Date.UTC(y, m - 1, d));
+    if (date.getUTCFullYear() !== y || date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return null;
+    return date.toISOString().slice(0, 10);
+  }
+
+  function fullYear(y) {
+    const n = Number(y);
+    return y.length === 2 ? 2000 + n : n;
+  }
+
+  // Svi datumi u tekstu: dd.mm.gggg, dd.mm.gg, dd/mm/gggg, te mm.gggg (mjesec i godina —
+  // Uredba 1169/2011 to dopušta za dulje trajne proizvode; tada vrijedi do kraja mjeseca).
+  function findDates(folded) {
+    const out = [];
+    const full = /\b(\d{1,2})\s?[./-]\s?(\d{1,2})\s?[./-]\s?(\d{4}|\d{2})\b/g;
+    let m;
+    while ((m = full.exec(folded))) {
+      const iso = isoDate(fullYear(m[3]), Number(m[2]), Number(m[1]));
+      if (iso) out.push({ iso, index: m.index, end: m.index + m[0].length, monthOnly: false });
+    }
+    const monthYear = /\b(\d{1,2})\s?[./-]\s?(\d{4})\b/g;
+    while ((m = monthYear.exec(folded))) {
+      const start = m.index;
+      if (out.some((d) => start >= d.index && start < d.end)) continue; // dio punog datuma
+      if (/\d\s?[./-]\s?$/.test(folded.slice(Math.max(0, start - 4), start))) continue; // dio (nevaljanog) punog datuma, npr. 31.02.2026
+      const y = Number(m[2]);
+      const mo = Number(m[1]);
+      if (mo < 1 || mo > 12) continue;
+      const lastDay = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+      out.push({ iso: isoDate(y, mo, lastDay), index: start, end: start + m[0].length, monthOnly: true });
+    }
+    return out.filter((d) => d.iso >= '2000-01-01' && d.iso <= '2100-12-31').sort((a, b) => a.index - b.index);
+  }
+
+  function findExpiry(text) {
+    const folded = fold(text || '');
+    const dates = findDates(folded);
+    if (!dates.length) return null;
+    for (const [re, kind] of EXPIRY_KEYWORDS) {
+      const k = re.exec(folded);
+      if (!k) continue;
+      // Prvi datum unutar ~80 znakova iza ključne riječi.
+      const after = dates.find((d) => d.index >= k.index && d.index - (k.index + k[0].length) <= 80);
+      if (after) return { date: after.iso, kind, monthOnly: after.monthOnly, sure: true };
+    }
+    // Bez ključne riječi: najkasniji datum (datum proizvodnje je uvijek raniji od roka). Nesigurno.
+    const latest = dates.reduce((a, b) => (b.iso > a.iso ? b : a));
+    return { date: latest.iso, kind: 'best_before', monthOnly: latest.monthOnly, sure: false };
+  }
+
+  /* ---------- Zemlja proizvodnje ---------- */
+
+  // „Proizvedeno za …” namjerno nije na popisu — to je naručitelj/distributer, ne mjesto proizvodnje.
+  const COUNTRY_RE = /(zemlja (?:podrijetla|porijekla|proizvodnje)|proizvedeno u|proizvedeno i pakirano u|zemlja podrijetla proizvoda|made in|produced in|country of origin|hergestellt in|ursprungsland)\s*[:\-]?\s*([^,.;:\n()]{2,40})/;
+
+  function findCountry(text) {
+    const nfc = (text || '').normalize('NFC');
+    const m = COUNTRY_RE.exec(fold(nfc));
+    if (!m) return '';
+    const start = m.index + m[0].length - m[2].length;
+    return nfc.slice(start, start + m[2].length).trim();
+  }
+
   function parseLabel(text) {
     const ingredients = findIngredients(text);
     return {
@@ -110,6 +183,8 @@
       traces: findTraces(text),
       nutriments: findNutrition(text),
       allergens: suggestAllergens(ingredients),
+      expiry: findExpiry(text),
+      country: findCountry(text),
     };
   }
 
@@ -156,7 +231,7 @@
     return { text: data.text || '', confidence: data.confidence };
   }
 
-  const api = { parseLabel, findIngredients, findNutrition, findTraces, suggestAllergens, recognize, fold };
+  const api = { parseLabel, findIngredients, findNutrition, findTraces, suggestAllergens, findExpiry, findCountry, recognize, fold };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.LabelOcr = api;
 })(typeof self !== 'undefined' ? self : this);

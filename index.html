@@ -82,6 +82,9 @@
           <label class="field">Neto količina
             <input name="quantity" placeholder="npr. 500 g, 250 ml">
           </label>
+          <label class="field">Zemlja proizvodnje
+            <input name="country_of_manufacture" placeholder="npr. Hrvatska">
+          </label>
           <div class="field">
             <span>Fotografija proizvoda</span>
             <div class="photo-row">
@@ -91,6 +94,18 @@
               </label>
             </div>
           </div>
+        </section>
+
+        <section class="card">
+          <h2>Rok trajanja (s ovog pakiranja)</h2>
+          <div class="expiry-form">
+            <select name="expiry_kind" aria-label="Vrsta roka">
+              <option value="best_before">Najbolje upotrijebiti do</option>
+              <option value="use_by">Upotrijebiti do</option>
+            </select>
+            <input type="date" name="expiry_date" aria-label="Datum">
+          </div>
+          <p class="muted small">Popunjava se i iz fotografije deklaracije ako je datum na njoj.</p>
         </section>
 
         <section class="card">
@@ -117,8 +132,8 @@
         <section class="card">
           <h2>Ostalo</h2>
           <label class="field">Kategorija <input name="categories"></label>
-          <label class="field">Podrijetlo <input name="origins"></label>
-          <label class="field">Mjesto proizvodnje <input name="manufacturing_places"></label>
+          <label class="field">Podrijetlo sastojaka <input name="origins"></label>
+          <label class="field">Mjesto proizvodnje (grad, tvornica) <input name="manufacturing_places"></label>
           <label class="field">Uvjeti čuvanja <input name="conservation_conditions"></label>
           <label class="field">Upute za uporabu i upozorenja <textarea name="usage_text" rows="3"></textarea></label>
           <label class="field">Proizvođač / uvoznik / kontakt <textarea name="customer_service" rows="2"></textarea></label>
