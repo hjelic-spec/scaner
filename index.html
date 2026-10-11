@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="hr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Skener deklaracija</title>
+  <meta name="description" content="Skeniraj bar kod proizvoda i pregledaj podatke s deklaracije.">
+  <meta name="theme-color" content="#1f7a4d">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>Skener deklaracija</h1>
+  </header>
+
+  <main>
+    <section class="card" id="scanner-card">
+      <div class="video-wrap" id="video-wrap" hidden>
+        <video id="video" playsinline muted></video>
+        <div class="aim" aria-hidden="true"></div>
+      </div>
+      <div class="actions">
+        <button id="scan-btn" class="primary" type="button">📷 Skeniraj bar kod</button>
+        <button id="stop-btn" type="button" hidden>Zaustavi</button>
+      </div>
+      <form id="manual-form" class="manual" autocomplete="off">
+        <label for="manual-input">ili upiši broj ispod bar koda</label>
+        <div class="row">
+          <input id="manual-input" inputmode="numeric" pattern="[0-9]{8,14}" placeholder="npr. 3017624010701" required>
+          <button type="submit">Traži</button>
+        </div>
+      </form>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="result" aria-live="polite"></section>
+
+    <section class="card" id="history-card" hidden>
+      <h2>Nedavno skenirano</h2>
+      <ul id="history" class="history"></ul>
+    </section>
+  </main>
+
+  <footer class="footer">
+    Podaci: <a href="https://world.openfoodfacts.org" target="_blank" rel="noopener">Open Food Facts</a>
+    (ODbL licenca). Baza je otvorena i uređuju je korisnici, pa podaci mogu biti nepotpuni ili zastarjeli —
+    za alergene i zdravstvene odluke uvijek provjeri deklaraciju na pakiranju.
+  </footer>
+
+  <script src="vendor/zxing-0.21.3.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
