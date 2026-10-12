@@ -1,6 +1,7 @@
 package hr.skener.deklaracija;
 
 import android.net.Uri;
+import java.io.File;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -38,7 +39,7 @@ public class TextRecognitionPlugin extends Plugin {
 
         InputImage image;
         try {
-            image = InputImage.fromFilePath(getContext(), Uri.parse(uri));
+            image = InputImage.fromFilePath(getContext(), toUri(uri));
         } catch (Exception e) {
             call.reject("Fotografija se ne može otvoriti: " + e.getMessage(), e);
             return;
@@ -60,6 +61,18 @@ public class TextRecognitionPlugin extends Plugin {
                 call.resolve(ret);
             })
             .addOnFailureListener(e -> call.reject("ML Kit: " + e.getMessage(), e));
+    }
+
+    /**
+     * Kamera vraća običnu putanju datoteke („/data/user/0/…/cache/…”), a ponekad file:// ili content://
+     * adresu. Putanju bez sheme treba pretvoriti u file:// Uri — inače je Android tumači kao content://
+     * i javlja „No content provider”.
+     */
+    static Uri toUri(String value) {
+        if (value.startsWith("/")) {
+            return Uri.fromFile(new File(value));
+        }
+        return Uri.parse(value);
     }
 
     @Override

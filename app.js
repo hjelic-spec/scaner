@@ -1138,7 +1138,9 @@ editorForm.addEventListener('click', async (e) => {
   try {
     const photo = await LabelOcr.takeNativePhoto();
     if (!photo) return;
-    const blob = await (await fetch(photo.webPath)).blob();
+    const cap = window.Capacitor;
+    const src = photo.webPath || (cap && cap.convertFileSrc ? cap.convertFileSrc(photo.uri) : photo.uri);
+    const blob = await (await fetch(src)).blob();
     editorState.imageBlob = await resizeToBlob(blob);
     editorState.uploaded = false;
     editorState.imagePath = null;
