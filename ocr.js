@@ -304,13 +304,16 @@
   /* ---------- Android: izvorna kamera + Google ML Kit ---------- */
 
   // U Android aplikaciji (Capacitor) koristi se izvorna kamera i ML Kit umjesto Tesseracta u WebViewu.
+  // Capacitorov most u aplikaciji daje isNativePlatform() i nativePromise(dodatak, metoda, opcije);
+  // registerPlugin() je dio paketa @capacitor/core koji ne učitavamo, pa ga ne koristimo.
   function native() {
     const cap = root.Capacitor;
-    if (!cap || !cap.isNativePlatform || !cap.isNativePlatform() || !cap.registerPlugin) return null;
-    if (!native.plugins) {
-      native.plugins = { camera: cap.registerPlugin('Camera'), text: cap.registerPlugin('TextRecognition') };
-    }
-    return native.plugins;
+    if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()
+        || typeof cap.nativePromise !== 'function') return null;
+    return {
+      camera: { takePhoto: (opts) => cap.nativePromise('Camera', 'takePhoto', opts) },
+      text: { recognize: (opts) => cap.nativePromise('TextRecognition', 'recognize', opts) },
+    };
   }
 
   function isCancel(err) {

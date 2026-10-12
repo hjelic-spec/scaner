@@ -59,7 +59,7 @@ public class TextRecognitionPlugin extends Plugin {
                 ret.put("text", sb.toString().trim());
                 call.resolve(ret);
             })
-            .addOnFailureListener(e -> call.reject("Prepoznavanje teksta nije uspjelo: " + e.getMessage(), e));
+            .addOnFailureListener(e -> call.reject("ML Kit: " + e.getMessage(), e));
     }
 
     @Override
