@@ -135,7 +135,10 @@ psql -d t -f supabase/tests/moderation_test.sql   # na kraju: SVI TESTOVI PROŠL
 
 - Podatke unose korisnici; „provjereno” znači da su ih potvrdila dva druga korisnika, ne službena provjera.
   **Za alergije i zdravstvene odluke uvijek je mjerodavna deklaracija na pakiranju.**
-- Prepoznavanje teksta je heurističko: dobro radi na oštroj, ravnoj fotografiji; lošije na zakrivljenim i sjajnim
+- Prepoznavanje teksta radi na uređaju, bez slanja slika: u **Android aplikaciji** Google ML Kit (latinica, uključujući
+  hrvatske dijakritike, model ugrađen u aplikaciju), u **web verziji** Tesseract.js s hrvatskim i engleskim modelom.
+  Iz prepoznatog teksta polja popunjava isti program (hrvatski i engleski natpisi s deklaracije).
+- Izvlačenje podataka iz teksta je heurističko: dobro radi na oštroj, ravnoj fotografiji; lošije na zakrivljenim i sjajnim
   pakiranjima i tablicama s više stupaca. Prijedlog alergena ne vidi podebljanja na pakiranju.
 - Podaci preuzeti iz Open Facts baza su pod licencom ODbL; spremanjem u zajedničku bazu ta licenca vrijedi i za
   izvedenu bazu (navođenje izvora, dijeljenje pod istim uvjetima).
@@ -149,7 +152,8 @@ psql -d t -f supabase/tests/moderation_test.sql   # na kraju: SVI TESTOVI PROŠL
 | `fields.js` | polja deklaracije, alergeni, nutrijenti, zemlje, GS1 prefiksi |
 | `countries.js` | ISO 3166-1 zemlje s hrvatskim nazivima (iz i18n-iso-countries 7.14.0, MIT) |
 | `api.js`, `config.js` | spajanje na Supabase |
-| `ocr.js` | prepoznavanje teksta (Tesseract.js 7.0.0, hrv+eng) i izvlačenje polja iz teksta |
+| `ocr.js` | prepoznavanje teksta (web: Tesseract.js 7.0.0 hrv+eng; Android: izvorna kamera + Google ML Kit) i izvlačenje polja iz teksta |
+| `android/app/src/main/java/…/TextRecognitionPlugin.java` | Android dodatak za Google ML Kit prepoznavanje teksta |
 | `db.js` | lokalna pohrana (IndexedDB) |
 | `supabase/` | shema baze, pravila i testovi |
 | `android/`, `capacitor.config.json`, `scripts/build-web.mjs` | Android aplikacija |

@@ -10,5 +10,11 @@ const FILES = [
 rmSync('www', { recursive: true, force: true });
 mkdirSync('www');
 for (const f of FILES) cpSync(f, `www/${f}`);
-cpSync('vendor', 'www/vendor', { recursive: true });
+// Tesseract jezgra i jezični modeli (~17 MB) ne idu u Android aplikaciju — ondje tekst prepoznaje
+// Google ML Kit (TextRecognitionPlugin.java). tesseract.min.js ostaje jer ga index.html učitava.
+const ANDROID_SKIP = ['vendor/tesseract/core', 'vendor/tesseract/lang'];
+cpSync('vendor', 'www/vendor', {
+  recursive: true,
+  filter: (src) => !ANDROID_SKIP.some((skip) => src.replaceAll('\\', '/').startsWith(skip)),
+});
 console.log(`www/: ${FILES.length} datoteka + vendor/`);

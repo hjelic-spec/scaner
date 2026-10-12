@@ -301,7 +301,44 @@
     return { text: data.text || '', confidence: data.confidence };
   }
 
+  /* ---------- Android: izvorna kamera + Google ML Kit ---------- */
+
+  // U Android aplikaciji (Capacitor) koristi se izvorna kamera i ML Kit umjesto Tesseracta u WebViewu.
+  function native() {
+    const cap = root.Capacitor;
+    if (!cap || !cap.isNativePlatform || !cap.isNativePlatform() || !cap.registerPlugin) return null;
+    if (!native.plugins) {
+      native.plugins = { camera: cap.registerPlugin('Camera'), text: cap.registerPlugin('TextRecognition') };
+    }
+    return native.plugins;
+  }
+
+  function isCancel(err) {
+    return /cancel|odustao|no image/i.test(errorText(err));
+  }
+
+  // Snima fotografiju izvornom kamerom. Vraća { uri, webPath } ili null ako je korisnik odustao.
+  async function takeNativePhoto() {
+    try {
+      const photo = await native().camera.takePhoto({ quality: 90, correctOrientation: true, saveToGallery: false });
+      return photo && photo.uri ? photo : null;
+    } catch (err) {
+      if (isCancel(err)) return null;
+      throw new Error('Kamera se ne može otvoriti: ' + errorText(err));
+    }
+  }
+
+  async function recognizeNative(onProgress) {
+    const photo = await takeNativePhoto();
+    if (!photo) return null;
+    if (onProgress) onProgress({ status: 'recognizing text', label: 'Prepoznajem tekst', progress: 0.5 });
+    const result = await withTimeout(native().text.recognize({ uri: photo.uri }), RECOGNIZE_TIMEOUT_MS,
+      'Prepoznavanje traje predugo.');
+    return { text: (result && result.text) || '', confidence: null };
+  }
+
   const api = {
+    hasNative: () => Boolean(native()), recognizeNative, takeNativePhoto,
     parseLabel, findIngredients, findNutrition, findTraces, suggestAllergens, findCountry, findManufacturer,
     findDistributor, findStorage, findAlcohol, findQuantity, findDrainedWeight, findIdentificationMark, recognize, fold,
   };

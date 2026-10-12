@@ -54,10 +54,10 @@ jobs:
       - name: Testna (debug) verzija
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
-      - name: Provjera sadržaja APK-a (datoteke za prepoznavanje teksta)
+      - name: Provjera sadržaja APK-a
         run: |
           unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -E "public/(index.html|vendor/)" | tee apk-assets.txt
-          for f in vendor/tesseract/worker.min.js vendor/tesseract/tesseract.min.js vendor/tesseract/lang/hrv.traineddata vendor/tesseract/lang/eng.traineddata; do
+          for f in vendor/zxing-0.21.3.min.js vendor/tesseract/tesseract.min.js app.js ocr.js; do
             grep -q "public/$f" apk-assets.txt || { echo "::error::Nedostaje $f u APK-u"; exit 1; }
           done
       - uses: actions/upload-artifact@v4

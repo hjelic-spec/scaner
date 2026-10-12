@@ -891,17 +891,24 @@ async function runOcr(file) {
   progress.hidden = false;
   progress.value = 0;
   status.classList.remove('error');
-  const native = Boolean(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
-  status.textContent = native
-    ? 'Pokrećem prepoznavanje teksta…'
-    : 'Pokrećem prepoznavanje teksta (prvi put se preuzima oko 10 MB, zatim radi bez interneta)…';
+  const onProgress = (m) => {
+    if (!m.label) return;
+    const pct = typeof m.progress === 'number' ? m.progress : 0;
+    status.textContent = file ? `${m.label}… ${Math.round(pct * 100)} %` : `${m.label}…`;
+    progress.value = pct;
+  };
   try {
-    const { text, confidence } = await LabelOcr.recognize(file, (m) => {
-      if (!m.label) return;
-      const pct = typeof m.progress === 'number' ? m.progress : 0;
-      status.textContent = `${m.label}… ${Math.round(pct * 100)} %`;
-      progress.value = pct;
-    });
+    let result;
+    if (file) {
+      status.textContent = 'Pokrećem prepoznavanje teksta (prvi put se preuzima oko 10 MB, zatim radi bez interneta)…';
+      result = await LabelOcr.recognize(file, onProgress);
+    } else {
+      // Android aplikacija: izvorna kamera + Google ML Kit
+      status.textContent = 'Otvaram kameru…';
+      result = await LabelOcr.recognizeNative(onProgress);
+      if (!result) { status.textContent = ''; return; } // korisnik je odustao
+    }
+    const { text, confidence } = result;
     if (!text.trim()) {
       status.textContent = 'Na slici nije prepoznat tekst. Pokušaj bliže, oštrije i uz bolje svjetlo.';
       return;
@@ -909,7 +916,7 @@ async function runOcr(file) {
     const raw = $('#raw-text');
     raw.value = raw.value.trim() ? `${raw.value.trim()}\n\n${text.trim()}` : text.trim();
     const filled = applyParsed(LabelOcr.parseLabel(raw.value));
-    status.textContent = `Tekst prepoznat (pouzdanost ${Math.round(confidence)} %). `
+    status.textContent = `Tekst prepoznat${confidence != null ? ` (pouzdanost ${Math.round(confidence)} %)` : ''}. `
       + (filled.length ? `Popunjeno: ${filled.join(', ')}. ` : 'Polja nisu automatski prepoznata — prepiši ih iz prepoznatog teksta. ')
       + 'Obavezno provjeri sve vrijednosti.';
   } catch (err) {
@@ -1111,7 +1118,9 @@ editorForm.addEventListener('submit', saveEditor);
 field('type').addEventListener('change', updateTypeVisibility);
 $('#cancel-btn').addEventListener('click', () => showView('main-view'));
 $('#delete-btn').addEventListener('click', deleteLocal);
-$('#ocr-btn').addEventListener('click', () => $('#ocr-file').click());
+$('#ocr-btn').addEventListener('click', () => {
+  if (LabelOcr.hasNative()) runOcr(null); else $('#ocr-file').click();
+});
 $('#ocr-file').addEventListener('change', (e) => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';
@@ -1120,6 +1129,23 @@ $('#ocr-file').addEventListener('change', (e) => {
 $('#reparse-btn').addEventListener('click', () => {
   const filled = applyParsed(LabelOcr.parseLabel($('#raw-text').value));
   $('#ocr-status').textContent = filled.length ? `Popunjeno: ${filled.join(', ')}.` : 'Ništa novo nije prepoznato (popunjavaju se samo prazna polja).';
+});
+// Android aplikacija: fotografija proizvoda izvornom kamerom (pouzdanije od odabira datoteke u WebViewu).
+editorForm.addEventListener('click', async (e) => {
+  const label = e.target.closest('.button-like');
+  if (!label || !LabelOcr.hasNative()) return;
+  e.preventDefault();
+  try {
+    const photo = await LabelOcr.takeNativePhoto();
+    if (!photo) return;
+    const blob = await (await fetch(photo.webPath)).blob();
+    editorState.imageBlob = await resizeToBlob(blob);
+    editorState.uploaded = false;
+    editorState.imagePath = null;
+    renderEditorPhoto();
+  } catch (err) {
+    $('#editor-msg').textContent = 'Fotografija se ne može učitati: ' + errMsg(err);
+  }
 });
 $('#photo-file').addEventListener('change', async (e) => {
   const file = e.target.files && e.target.files[0];
