@@ -56,7 +56,7 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
       - name: Provjera sadržaja APK-a
         run: |
-          unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep -E "public/(index.html|vendor/)" | tee apk-assets.txt
+          unzip -l android/app/build/outputs/apk/debug/app-debug.apk | grep "assets/public/" | tee apk-assets.txt
           for f in vendor/zxing-0.21.3.min.js vendor/tesseract/tesseract.min.js app.js ocr.js; do
             grep -q "public/$f" apk-assets.txt || { echo "::error::Nedostaje $f u APK-u"; exit 1; }
           done
